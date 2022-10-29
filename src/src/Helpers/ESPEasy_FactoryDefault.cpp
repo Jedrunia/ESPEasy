@@ -3,6 +3,7 @@
 #include "../../ESPEasy_common.h"
 #include "../../_Plugin_Helper.h"
 
+#include "../CustomBuild/CompiletimeDefines.h"
 #include "../CustomBuild/StorageLayout.h"
 
 #include "../DataStructs/ControllerSettingsStruct.h"
@@ -19,6 +20,7 @@
 
 #include "../Helpers/_CPlugin_Helper.h"
 #include "../Helpers/ESPEasyRTC.h"
+#include "../Helpers/FS_Helper.h"
 #include "../Helpers/Hardware.h"
 #include "../Helpers/Misc.h"
 
@@ -27,7 +29,7 @@
  \*********************************************************************************************/
 void ResetFactory()
 {
-  #ifdef USE_CUSTOM_PROVISIONING
+  #if FEATURE_CUSTOM_PROVISIONING
   if (ResetFactoryDefaultPreference.getPreference() == 0)
   {
     ResetFactoryDefaultPreference.setDeviceModel(static_cast<DeviceModel>(DEFAULT_FACTORY_DEFAULT_DEVICE_MODEL));
@@ -93,7 +95,7 @@ void ResetFactory()
     return;
   }
 
-#ifdef USE_CUSTOM_PROVISIONING
+#if FEATURE_CUSTOM_PROVISIONING
   {
     MakeProvisioningSettings(ProvisioningSettings);
     if (AllocatedProvisioningSettings()) {
@@ -109,9 +111,9 @@ void ResetFactory()
   // pad files with extra zeros for future extensions
   InitFile(SettingsType::SettingsFileEnum::FILE_CONFIG_type);
   InitFile(SettingsType::SettingsFileEnum::FILE_SECURITY_type);
-  #ifdef USES_NOTIFIER
+  #if FEATURE_NOTIFIER
   InitFile(SettingsType::SettingsFileEnum::FILE_NOTIFICATION_type);
-  #endif
+  #endif // if FEATURE_NOTIFIER
 
   InitFile(getRulesFileName(0), 0);
 
@@ -171,8 +173,6 @@ void ResetFactory()
     strcpy_P(SecuritySettings.WifiSSID2, PSTR(DEFAULT_SSID2));
     strcpy_P(SecuritySettings.WifiKey2,  PSTR(DEFAULT_KEY2));
     strcpy_P(SecuritySettings.WifiAPKey, PSTR(DEFAULT_AP_KEY));
-    SecuritySettings.WifiSSID2[0] = 0;
-    SecuritySettings.WifiKey2[0]  = 0;
   }
   strcpy_P(SecuritySettings.Password, PSTR(DEFAULT_ADMIN_PASS));
 
@@ -183,7 +183,7 @@ void ResetFactory()
 
   Settings.PID     = ESP_PROJECT_PID;
   Settings.Version = VERSION;
-  Settings.Build   = BUILD;
+  Settings.Build   = get_build_nr();
 
   //  Settings.IP_Octet				 = DEFAULT_IP_OCTET;
   Settings.Delay                   = DEFAULT_DELAY;
@@ -194,7 +194,7 @@ void ResetFactory()
   Settings.Pin_sd_cs               = -1;
   Settings.Pin_Reset               = DEFAULT_PIN_RESET_BUTTON;
   Settings.Protocol[0]             = DEFAULT_PROTOCOL;
-  Settings.deepSleep_wakeTime      = false;
+  Settings.deepSleep_wakeTime      = 0; // Sleep disabled
   Settings.CustomCSS               = false;
   Settings.InitSPI                 = DEFAULT_SPI;
 
@@ -279,6 +279,7 @@ void ResetFactory()
       ControllerSettings.UseDNS = DEFAULT_SERVER_USEDNS;
       ControllerSettings.useExtendedCredentials(DEFAULT_USE_EXTD_CONTROLLER_CREDENTIALS);
       ControllerSettings.Port = DEFAULT_PORT;
+      ControllerSettings.ClientTimeout = DEFAULT_CONTROLLER_TIMEOUT;
       setControllerUser(0, ControllerSettings, F(DEFAULT_CONTROLLER_USER));
       setControllerPass(0, ControllerSettings, F(DEFAULT_CONTROLLER_PASS));
 

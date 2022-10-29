@@ -8,7 +8,6 @@
 #include "../Globals/Cache.h"
 #include "../Globals/Device.h"
 #include "../Globals/EventQueue.h"
-#include "../Globals/ExtraTaskSettings.h"
 #include "../Globals/Plugins.h"
 #include "../Globals/Plugins_other.h"
 #include "../Globals/Settings.h"
@@ -447,6 +446,9 @@ void parse_string_commands(String& line) {
       uint64_t iarg1, iarg2 = 0;
       double   fresult = 0.0;
       int64_t  iresult = 0;
+      int startpos, endpos = -1;
+      const bool arg1valid = validIntFromString(arg1, startpos);
+      const bool arg2valid = validIntFromString(arg2, endpos);
 
       if (parse_math_functions(cmd_s_lower, arg1, arg2, arg3, fresult)) {
         const bool trimTrailingZeros = true;
@@ -456,12 +458,30 @@ void parse_string_commands(String& line) {
       } else if (cmd_s_lower.equals(F("substring"))) {
         // substring arduino style (first char included, last char excluded)
         // Syntax like 12345{substring:8:12:ANOTHER HELLO WORLD}67890
-        int startpos, endpos = -1;
 
-        if (validIntFromString(arg1, startpos)
-            && validIntFromString(arg2, endpos)) {
+        if (arg1valid
+            && arg2valid) {
           replacement = arg3.substring(startpos, endpos);
         }
+      // #ifndef LIMIT_BUILD_SIZE
+      } else if (cmd_s_lower.equals(F("timetomin")) || cmd_s_lower.equals(F("timetosec"))) {
+        // time to minutes, transform a substring hh:mm to minutes
+        // time to seconds, transform a substring hh:mm:ss to seconds
+        // syntax similar to substring
+
+        if (arg1valid
+            && arg2valid) {
+          int timeSeconds = 0;
+          String timeString;
+          if(timeStringToSeconds(arg3.substring(startpos, endpos), timeSeconds, timeString)) {
+            if (cmd_s_lower.equals(F("timetosec"))) {
+              replacement = timeSeconds;
+            } else { // timetomin
+              replacement = timeSeconds / 60;
+            }
+          }
+        }
+      // #endif // ifndef LIMIT_BUILD_SIZE
       } else if (cmd_s_lower.equals(F("strtol"))) {
         // string to long integer (from cstdlib)
         // Syntax like 1234{strtol:16:38}7890
@@ -841,7 +861,7 @@ void processMatchedRule(String& action, const String& event,
     }
   }
 
-  if ((lcAction == F("else")) && !fakeIfBlock) // in case of an "else" block of
+  if ((lcAction.equals(F("else"))) && !fakeIfBlock) // in case of an "else" block of
                                                // actions, set ifBranche to
                                                // false
   {
@@ -859,7 +879,7 @@ void processMatchedRule(String& action, const String& event,
 #endif // ifndef BUILD_NO_DEBUG
   }
 
-  if (lcAction == F("endif")) // conditional block ends here
+  if (lcAction.equals(F("endif"))) // conditional block ends here
   {
     if (fakeIfBlock) {
       fakeIfBlock--;
@@ -1199,16 +1219,13 @@ void createRuleEvents(struct EventStruct *event) {
 // TD-er: Disabled for now, suspect for causing crashes
   #endif
 
-
-  LoadTaskSettings(event->TaskIndex);
-
   const uint8_t valueCount = getValueCountForTask(event->TaskIndex);
 
   // Small optimization as sensor type string may result in large strings
   // These also only yield a single value, so no need to check for combining task values.
   if (event->sensorType == Sensor_VType::SENSOR_TYPE_STRING) {
     size_t expectedSize = 2 + getTaskDeviceName(event->TaskIndex).length();
-    expectedSize += strlen(ExtraTaskSettings.TaskDeviceValueNames[0]);
+    expectedSize += getTaskValueName(event->TaskIndex, 0).length();
    
     bool appendCompleteStringvalue = false;
     String eventString;
@@ -1222,7 +1239,7 @@ void createRuleEvents(struct EventStruct *event) {
     }
     eventString += getTaskDeviceName(event->TaskIndex);
     eventString += '#';
-    eventString += ExtraTaskSettings.TaskDeviceValueNames[0];
+    eventString += getTaskValueName(event->TaskIndex, 0);
     eventString += '=';
     eventString += '`';
     if (appendCompleteStringvalue) {
@@ -1253,7 +1270,7 @@ void createRuleEvents(struct EventStruct *event) {
       eventString.reserve(64); // Enough for most use cases, prevent lots of memory allocations.
       eventString += getTaskDeviceName(event->TaskIndex);
       eventString += '#';
-      eventString += ExtraTaskSettings.TaskDeviceValueNames[varNr];
+      eventString += getTaskValueName(event->TaskIndex, varNr);
       eventString += '=';
       eventString += formatUserVarNoCheck(event, varNr);
       eventQueue.addMove(std::move(eventString));

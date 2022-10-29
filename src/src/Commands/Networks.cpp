@@ -6,18 +6,17 @@
 #include "../ESPEasyCore/ESPEasyEth.h"
 #include "../Globals/NetworkState.h"
 #include "../Globals/Settings.h"
+#include "../Helpers/StringConverter.h"
 #include "../WebServer/AccessControl.h"
 
 
-#ifdef HAS_ETHERNET
+#if FEATURE_ETHERNET
 #include <ETH.h>
 #endif
 
 String Command_AccessInfo_Ls(struct EventStruct *event, const char* Line)
 {
-  String result = F("Allowed IP range : ");
-  result += describeAllowedIPrange();
-  return return_result(event, result);
+  return return_result(event, concat(F("Allowed IP range : "), describeAllowedIPrange()));
 }
 
 String Command_AccessInfo_Clear (struct EventStruct *event, const char* Line)
@@ -46,7 +45,7 @@ String Command_Subnet (struct EventStruct *event, const char* Line)
   return Command_GetORSetIP(event, F("Subnet:"), Line, Settings.Subnet, NetworkSubnetMask(), 1);
 }
 
-#ifdef HAS_ETHERNET
+#if FEATURE_ETHERNET
 String Command_ETH_Phy_Addr (struct EventStruct *event, const char* Line)
 {
   return Command_GetORSetInt8_t(event, F("ETH_Phy_Addr:"), Line, reinterpret_cast<int8_t*>(&Settings.ETH_Phy_Addr),1);
@@ -131,7 +130,7 @@ String Command_ETH_Disconnect (struct EventStruct *event, const char* Line)
   setNetworkMedium(NetworkMedium_t::Ethernet);
   ETHConnectRelaxed();
 
-  return return_command_success();
+  return return_command_success_str();
 }
 
-#endif
+#endif // if FEATURE_ETHERNET

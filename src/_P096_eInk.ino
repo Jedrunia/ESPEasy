@@ -7,7 +7,7 @@
 
 # define PLUGIN_096
 # define PLUGIN_ID_096         96
-# define PLUGIN_NAME_096       "Display - eInk with Lolin ePaper screen [TESTING]"
+# define PLUGIN_NAME_096       "Display - eInk with Lolin ePaper screen"
 # define PLUGIN_VALUENAME1_096 "CursorX"
 # define PLUGIN_VALUENAME2_096 "CursorY"
 
@@ -256,7 +256,7 @@ boolean Plugin_096(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      addFormPinSelect(formatGpioName_output(F("EPD BUSY")), F("p096_epd_busy"), PIN(3));
+      addFormPinSelect(PinSelectPurpose::Generic_output, formatGpioName_output(F("EPD BUSY")), F("p096_epd_busy"), PIN(3));
 
       # if P096_USE_EXTENDED_SETTINGS
 
@@ -463,13 +463,13 @@ boolean Plugin_096(uint8_t function, struct EventStruct *event, String& string)
 
       P096_CONFIG_FLAGS = lSettings;
 
-      String   color   = web_server.arg(F("p096_foregroundcolor"));
+      String   color   = webArg(F("p096_foregroundcolor"));
       uint16_t fgcolor = static_cast<uint16_t>(AdaGFXMonoRedGreyscaleColors::ADAGFXEPD_BLACK);             // Default to white when empty
 
       if (!color.isEmpty()) {
         fgcolor = AdaGFXparseColor(color, static_cast<AdaGFXColorDepth>(P096_CONFIG_FLAG_GET_COLORDEPTH)); // Reduce to rgb565
       }
-      color = web_server.arg(F("p096_backgroundcolor"));
+      color = webArg(F("p096_backgroundcolor"));
       uint16_t bgcolor = AdaGFXparseColor(color, static_cast<AdaGFXColorDepth>(P096_CONFIG_FLAG_GET_COLORDEPTH));
 
       P096_CONFIG_COLORS = fgcolor | (bgcolor << 16); // Store as a single setting
@@ -478,7 +478,7 @@ boolean Plugin_096(uint8_t function, struct EventStruct *event, String& string)
       String error;
 
       for (uint8_t varNr = 0; varNr < P096_Nlines; varNr++) {
-        strings[varNr] = web_server.arg(getPluginCustomArgName(varNr));
+        strings[varNr] = webArg(getPluginCustomArgName(varNr));
       }
 
       error = SaveCustomTaskSettings(event->TaskIndex, strings, P096_Nlines, 0);

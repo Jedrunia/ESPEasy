@@ -1,5 +1,6 @@
+#####
 Rules
-*****
+#####
 
 Introduction
 ============
@@ -10,16 +11,37 @@ Rules can be used to create very simple flows to control devices on your ESP.
 .. note::
    To assist writing rules, one may prefer to use an editor like Notepad++ which supports user defined languages to colorize the text.
    See the ``Misc/Notepad++`` folder for a Notepad++ language definition which can be used to colorize rules.
+   Another option is the `ESPeasy Code Editor <https://raw.githack.com/chromoxdor/EasyColorCode/main/colorcode.html>`_ , an online editor with rules highlighting and hinting.
 
 Enable Rules
 ------------
 
 To enable rules, :menuselection:`Tools --> Advanced` and check the Rules checkbox.
 
-After clicking Submit, you will find a new page added. Here you can start
-experimenting with Rules:
+After clicking Submit, you will find the Rules tab added. Here you can start experimenting with Rules:
 
-[ADD_GUI_PICTURE]
+.. image:: Advanced_RulesOptions.png
+  :alt: Rules options
+
+* **Rules**: Enable the use of rules. If disabled, also (most) events will no longer be generated, as they won't be processed, though data will still be sent to Controllers.
+* **Enable Rules Cache**: For faster processing of rules they can be (partially) cached in memory. If memory is really low this option can be disabled.
+* **Tolerant last parameter**: A few commands can use, for backward compatibility, a more tolerant handling of the last parameter, as suggested in the note. This feature should be enabled if it is needed.
+
+.. code:: none
+
+  on System#Boot do
+    GPIO,12,0
+    LoopTimerSet,1,10
+  endon
+
+  on Rules#Timer=1 do
+    if [E1SW1#State]=1
+      GPIO,12,0
+    else
+      GPIO,12,1
+    endif
+  endon
+
 
 The example above shows an experiment with a LED, connected via a resistor of
 1k to GPIO12 and to ground.
@@ -64,6 +86,23 @@ Special Notations
  Formulas used in tasks (thus not using the rules) may refer to ``%value%`` for the new current value and ``%pvalue%`` for the previous value before ``PLUGIN_READ`` was called.
  These notations cannot be used in the rules.
  If a previous value is needed, one has to use variables for it.
+
+
+Dot Notation
+^^^^^^^^^^^^
+
+The dot (``.``) can be used to refer to something "belonging" to something else.
+For example calling a command on a specific task (``pulsecounter.resetpulsecounter``) to reset the pulse counter on a specific Pulse Counter task.
+
+(Added: 2022/07/11)
+For task values with "Stats" enabled, one can also access statistical properties of the data or call commands on this statistical data.
+
+For example using just like normal task value data:
+
+* ``[bme#temp.avg]`` Compute the average over the last N samples in the historic buffer (typically: 64 samples on ESP32, 16 on ESP8266)
+
+See :ref:`Task Value Statistics:  <Task Value Statistics>` for more examples.
+
 
 
 Syntax
@@ -154,6 +193,8 @@ for the limitation of not being able to nest. An "event" can be called from a
 consumption of stack space (IRAM). Depending on plug-ins in use this might
 lead to unpredictable, unreliable behavior, advice is not to exceed 3 levels
 of nesting.
+
+To avoid nesting of events, ``AsyncEvent`` can be used, using the same syntax as ``Event``, that will add the event to the end of the current event queue, for processing after other events are completed.
 
 .. code-block:: none
 
@@ -744,6 +785,8 @@ The reason this behavior was changed from before 2019/11 was that the old implem
 Formatting refered values
 -------------------------
 
+.. _Formatting values:
+
 When referring another value, some basic formatting can be used.
 
 Referring a value using some pre-defined format: ``[TaskName#ValueName#transformation#justification]``
@@ -942,6 +985,32 @@ Complete rule used to parse this and set a variable in a dummy device:
  // Room temperature
  on !Serial#T1018* do
    TaskValueSet 2,1,{strtol:16:{substring:13:15:%eventvalue%}}.{strtol:16:{substring:15:17:%eventvalue%}}*100/255
+ endon
+
+
+timeToMin/timeToSec
+^^^^^^^^^^^^^^^^^^^
+
+(Added: 2022-08-09)
+
+Convert a time-string to minutes/seconds.
+
+Usage:
+
+* ``{timeToMin:<startpos>:<endpos>:<string>}`` to convert a string, with hh:mm format, to minutes (0..1439)
+* ``{timeToSec:<startpos>:<endpos>:<string>}`` to convert a string, with hh:mm:ss format, to seconds (0..86399)
+
+The hour (hh), minute (mm) or seconds (ss) values *can* be provided in single-digit values, if applicable.
+
+The position arguments are the same as in Arduino ``String::substring`` , meaning the endpos is 1 position further than the last character you need.
+
+For example:
+
+.. code-block:: none
+ 
+ on Clock#Time=All,**:** do
+   logentry,"Minutes since midnight: {timeToMin:0:5:'%eventvalue2%'}"
+   logentry,"Seconds since midnight: {timeToSec:0:8:'%eventvalue2%:00'}" // Clock#Time doesn't include seconds, so we fake them
  endon
 
 
@@ -1771,6 +1840,14 @@ There is the following workaround:
 
    SendToHTTP 192.168.0.243,8080,/json.htm?type=param=switchlight&command&idx=174&switchcmd=On
 
+Added: 2022/07/23
+
+* ``SendToHTTP`` can now also be called with a full URL starting with ``http://``, so no longer the host, port and uri have to be separated. (it is still possible of course)
+* HTTP return value will be made available as event to be evaluated in the rules. Example event: ``http#hostname=404``
+* Calls made to a HTTP server can now also follow redirects. (GET and HEAD calls only) This has to be enabled in Tools->Advanced page.
+* Host name can contain user credentials. For example: ``http://username:pass@hostname:portnr/foo.html``
+* HTTP user credentials now can handle Basic Auth and Digest Auth.
+
 
 Dew Point for temp/humidity sensors (BME280 for example)
 --------------------------------------------------------
@@ -1979,5 +2056,132 @@ Therefore the ``asyncevent`` is used to append the events to a queue.
 This can be made much more dynamic as you may trigger a ``taskrun``, which will send an event when new values are read.
 Like this it is possible to automate a complex sequence of steps as not only GPIO pins can be stored, but also task indices.
 
+Validate a RFID tag against a sorted list
+-----------------------------------------
+
+For validating the Tag value, scanned using a RFID reader, it is quite time-consuming to check all, possibly hundreds, values.
+
+To speed up the search process, a b-tree search is much more efficient to find a match.
+
+The pre-requisites are:
+
+* A sorted list of accepted tag numbers
+* Enough memory to store the list
+* Configure "Serial Log Level" to ``Error`` (Tools/Advanced page) (logging is quite time-consuming, the script will log minimally on Error level)
+
+Storing a larger number of variables requires quite some memory so the use of an ESP32 is advised for larger tag-lists, 300 tags will need over 5 kB of RAM, and that could be problematic on an ESP8266, up to 100 tags should be achievable on an ESP8266 though.
+
+The list can be initialized calling the ``loadData`` event from ``On System#Boot Do``. This ``loadData`` event should be placed separately in the ``Rules Set 2`` file (or Rules Set 3 or Rules Set 4 if the other file is already used).
+
+.. code-block:: text
+
+  On loadData Do // Sorted by value
+    Let,1000,12345678
+    Let,1001,12345679
+    ....
+    Let,1300,34567890
+
+    Let,999,1300 // The last index used for storing a key (the upper limit for searching)
+  Endon
+
+This will initialize the list. A script can best be used to generate this list, as the values **must** be in sorted order from lowest to highest. Variables numbering is started at 1000, to leave lower numbers available for other script parts. Variable 999 is set to the highest variable number used, and variables 997 and 998 are used internally.
+
+NB: Despite a possible complaint that the filesize exceeds the web editor limit, this will work without problems, assuming a stable WiFi connection.
+
+The next script should be placed at the top of ``Rules Set 1`` as they are called quite often, rules processing starts from Rules Set 1, and stops when the first instance of a rule is handled.
+
+.. code-block:: text
+
+  On checkID Do
+    // %eventvalue1% = key
+    // %eventvalue2% = lower limit index
+    // %eventvalue3% = upper limit index
+    Let,997,(%eventvalue2%+%eventvalue3%)/2 // Compute "middle" index
+    Let,998,[int#997]+1
+    // [int#%v997%] is the key in the middle of our search range
+    
+    If %eventvalue1% = [int#%v997%] or %eventvalue1% = [int#%v998%] 
+      // Found it
+      Event,OkTag=%eventvalue1%
+    Else
+      If %eventvalue2%=%eventvalue3%
+        // Upper and lower limit are the same
+        // So we have not found the key
+        // No need to continue searching
+      Else
+        // When refering to an index, make sure to use the [int#<n>] notation, not the floating point version.
+        If %eventvalue1% > [int#%v997%]
+          // Check upper half
+          Asyncevent,checkID=%eventvalue1%,[int#997],%eventvalue3%
+        Else
+          // Check lower half
+          Asyncevent,checkID=%eventvalue1%,%eventvalue2%,[int#997]
+        Endif
+      Endif
+    Endif
+  Endon
+
+  On Turnstile_out#Tag Do // Out-going reader
+    If [Turnstile_out#Tag]>0
+      Event,readet=[Turnstile_out#Tag]
+    Endif
+  Endon
+
+  On Turnstile_in#Tag Do // Incoming reader
+    If [Turnstile_in#Tag]>0
+      Event,readet=[Turnstile_in#Tag]
+    Endif
+  Endon
+
+  On readet Do // Valid tag value, now check if accepted
+    // %eventvalue1% = key
+    // 1000  = Lower limit
+    // [int#999] = upper limit
+    Asyncevent,checkID=%eventvalue1%,1000,[int#999]
+  Endon
+
+  On OkTag Do // Matching tag found
+    LogEntry,'Tag %eventvalue1% OK',1 // ERROR log
+    LongPulse,25,0,2 // Activate door-opener on GPIO-25, active low, for 2 seconds
+  Endon
+
+  On System#Boot Do
+    Asyncevent,loadData // Load the sorted tag data
+  Endon
+
+Processing a single tag takes ca. 300 to 500 msec on an ESP32 on a list of ca. 256 tags. For for every *duplication* of the number of tags, an extra 20 to 25 msec is needed for processing.
+
+To find a match, on a list of ca. 256 tags, at most 10 asyncevent calls to checkID will be needed, max. 11 calls when having 512 tags, 12 calls for 1024 tags, etc. But then, the used amount of memory could become somewhat problematic...
+
+To process a list of tags into an ``On loadData Do`` event rule, this small python script can be used.
+
+It will read from file ``tags.txt`` and write to file ``loaddata.txt``:
+
+.. code-block:: python
+
+  # Process file tags.txt to an ESPEasy On loadData Do event
+
+  t = open('tags.txt','r')
+  tags = t.readlines()
+  tags.sort()
+
+  let = 1000
+
+  with open('loaddata.txt','w') as r:
+    r.write('On loadData Do // Sorted by value. Should be loaded from System#Boot event or reloaded manually using command: Asyncevent,loadData\n')
+
+    for rtag in tags:
+      tag = rtag.strip()
+      if tag.isnumeric() and int(tag) > 0: # Ignore non-numeric values, f.e. comments
+        r.write('  Let,')
+        r.write(str(let))
+        r.write(',')
+        r.write(tag)
+        r.write('\n')
+        let = let + 1
+    r.write('\n  Let,999,')
+    r.write(str(let - 1))
+    r.write(' // Last index used\n')
+    r.write('Endon\n')
 
 

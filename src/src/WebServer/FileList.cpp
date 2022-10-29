@@ -1,6 +1,6 @@
 #include "../WebServer/FileList.h"
 
-#include "../WebServer/WebServer.h"
+#include "../WebServer/ESPEasy_WebServer.h"
 #include "../WebServer/HTML_wrappers.h"
 #include "../WebServer/AccessControl.h"
 #include "../WebServer/Markup.h"
@@ -19,9 +19,9 @@
 #include "../Globals/C016_ControllerCache.h"
 #endif
 
-#ifdef FEATURE_SD
+#if FEATURE_SD
 #include <SD.h>
-#endif
+#endif // if FEATURE_SD
 
 
 #ifdef WEBSERVER_NEW_UI
@@ -145,7 +145,7 @@ void handle_filelist() {
   if (!clientIPallowed()) { return; }
   navMenuIndex = MENU_INDEX_TOOLS;
   TXBuffer.startStream();
-  sendHeadandTail_stdtemplate();
+  sendHeadandTail_stdtemplate(_HEAD);
 
   String fdelete = webArg(F("delete"));
 
@@ -155,7 +155,7 @@ void handle_filelist() {
   }
   # ifdef USES_C016
 
-  if (web_server.hasArg(F("delcache"))) {
+  if (hasArg(F("delcache"))) {
     while (C016_deleteOldestCacheBlock()) {
       delay(1);
     }
@@ -302,7 +302,7 @@ void handle_filelist_buttons(int start_prev, int start_next, bool cacheFilesPres
     addHtml(F("filelist?delcache'>Delete Cache Files</a>"));
   }
   addHtml(F("<BR><BR>"));
-  sendHeadandTail_stdtemplate(true);
+  sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
 }
 
@@ -311,7 +311,7 @@ void handle_filelist_buttons(int start_prev, int start_next, bool cacheFilesPres
 // ********************************************************************************
 // Web Interface SD card file and directory list
 // ********************************************************************************
-#ifdef FEATURE_SD
+#if FEATURE_SD
 void handle_SDfilelist() {
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("handle_SDfilelist"));
@@ -320,7 +320,7 @@ void handle_SDfilelist() {
   if (!clientIPallowed()) { return; }
   navMenuIndex = MENU_INDEX_TOOLS;
   TXBuffer.startStream();
-  sendHeadandTail_stdtemplate();
+  sendHeadandTail_stdtemplate(_HEAD);
 
 
   String fdelete;
@@ -330,17 +330,19 @@ void handle_SDfilelist() {
   String parent_dir;
 
   for (uint8_t i = 0; i < web_server.args(); i++) {
-    if (web_server.argName(i) == F("delete"))
+    // FIXME TD-er: This only checks for arguments in the URL, not in POST args
+    // It also takes only the last matching argument.
+    if (web_server.argName(i).equals(F("delete")))
     {
       fdelete = webArg(i);
     }
 
-    if (web_server.argName(i) == F("deletedir"))
+    if (web_server.argName(i).equals(F("deletedir")))
     {
       ddelete = webArg(i);
     }
 
-    if (web_server.argName(i) == F("chgto"))
+    if (web_server.argName(i).equals(F("chgto")))
     {
       change_to_dir = webArg(i);
     }
@@ -384,8 +386,7 @@ void handle_SDfilelist() {
   }
 
 
-  String subheader = "SD Card: " + current_dir;
-  addFormSubHeader(subheader);
+  addFormSubHeader(String(F("SD Card: ")) + current_dir);
   html_BR();
   html_table_class_multirow();
   html_table_header(F(""), 50);
@@ -401,7 +402,7 @@ void handle_SDfilelist() {
   while (entry)
   {
     html_TR_TD();
-    size_t entrynameLength = strlen(entry.name());
+    // size_t entrynameLength = strlen(entry.name());
     if (entry.isDirectory())
     {
       char SDcardChildDir[80];
@@ -465,8 +466,8 @@ void handle_SDfilelist() {
   html_end_form();
 
   // addHtml(F("<BR><a class='button link' href=\"/upload\">Upload</a>"));
-  sendHeadandTail_stdtemplate(true);
+  sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
 }
 
-#endif // ifdef FEATURE_SD
+#endif // if FEATURE_SD

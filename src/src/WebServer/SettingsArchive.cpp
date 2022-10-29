@@ -1,8 +1,8 @@
 #include "../WebServer/SettingsArchive.h"
 
-#ifdef USE_SETTINGS_ARCHIVE
+#if FEATURE_SETTINGS_ARCHIVE
 
-#include "../WebServer/WebServer.h"
+#include "../WebServer/ESPEasy_WebServer.h"
 #include "../WebServer/HTML_wrappers.h"
 #include "../WebServer/Markup.h"
 #include "../WebServer/Markup_Buttons.h"
@@ -34,7 +34,7 @@ void handle_settingsarchive() {
   html_TR();
   addFormHeader(F("Settings Archive"));
 
-  if (web_server.hasArg(F("savepref")) || web_server.hasArg(F("download"))) {
+  if (hasArg(F("savepref")) || hasArg(F("download"))) {
     // User choose a pre-defined config and wants to save it as the new default.
     for (int i = 0; i < FileType::MAX_FILETYPE; ++i) {
       const FileType::Enum ft = static_cast<FileType::Enum>(i);
@@ -48,7 +48,7 @@ void handle_settingsarchive() {
     }
 
     ResetFactoryDefaultPreference.deleteFirst(isFormItemChecked(F("del")));
-#ifdef USE_CUSTOM_PROVISIONING
+#if FEATURE_CUSTOM_PROVISIONING
     ResetFactoryDefaultPreference.saveURL(isFormItemChecked(F("saveurl")));
     ResetFactoryDefaultPreference.allowFetchByCommand(isFormItemChecked(F("allowcommand")));
     ResetFactoryDefaultPreference.storeCredentials(isFormItemChecked(F("savecred")));
@@ -56,20 +56,20 @@ void handle_settingsarchive() {
     applyFactoryDefaultPref();
 
     String error;
-    #ifdef USE_CUSTOM_PROVISIONING
+    #if FEATURE_CUSTOM_PROVISIONING
     {
       MakeProvisioningSettings(ProvisioningSettings);
       if (AllocatedProvisioningSettings()) {
         ProvisioningSettings.ResetFactoryDefaultPreference = ResetFactoryDefaultPreference.getPreference();
         if (ResetFactoryDefaultPreference.saveURL()) {
-          ProvisioningSettings.setUrl(web_server.arg(F("url")));
+          ProvisioningSettings.setUrl(webArg(F("url")));
         }
         if (ResetFactoryDefaultPreference.storeCredentials()) {
-          ProvisioningSettings.setUser(web_server.arg(F("user")));
-          ProvisioningSettings.setPass(web_server.arg(F("pass")));
+          ProvisioningSettings.setUser(webArg(F("user")));
+          ProvisioningSettings.setPass(webArg(F("pass")));
         }
       }
-      error += saveProvisioningSettings(ProvisioningSettings);
+      error = saveProvisioningSettings(ProvisioningSettings);
     }
     #endif
 
@@ -79,12 +79,12 @@ void handle_settingsarchive() {
 
   bool showOptions = true;
 
-  if (web_server.hasArg(F("download"))) {
+  if (hasArg(F("download"))) {
     // Try downloading files.
     // Don't use the ProvisioningSettings, as not all may be stored.
-    String url  = webArg(F("url"));
-    String user = webArg(F("user"));
-    String pass = webArg(F("pass"));
+    const String url  = webArg(F("url"));
+    const String user = webArg(F("user"));
+    const String pass = webArg(F("pass"));
 
     addTableSeparator(F("Download result"), 2, 3);
     bool somethingDownloaded = false;
@@ -115,7 +115,7 @@ void handle_settingsarchive() {
       addSubmitButton(F("Reboot"), F("reboot"), F("red"));
       addFormNote(F("If settings files are updated you MUST reboot first!"));
     }
-  } else if (web_server.hasArg(F("reboot"))) {
+  } else if (hasArg(F("reboot"))) {
     showOptions = false;
     reboot(ESPEasy_Scheduler::IntendedRebootReason_e::RestoreSettings);
   }
@@ -128,7 +128,7 @@ void handle_settingsarchive() {
       String url, user, pass;
 
       {
-        #ifdef USE_CUSTOM_PROVISIONING
+        #if FEATURE_CUSTOM_PROVISIONING
         {
           MakeProvisioningSettings(ProvisioningSettings);
           if (AllocatedProvisioningSettings()) {
@@ -140,25 +140,25 @@ void handle_settingsarchive() {
         }
         #endif
 
-        if (web_server.arg(F("url")).length() != 0) {
-          url = web_server.arg(F("url"));
+        if (webArg(F("url")).length() != 0) {
+          url = webArg(F("url"));
         }
-        if (web_server.arg(F("user")).length() != 0) {
-          user = web_server.arg(F("user"));
+        if (webArg(F("user")).length() != 0) {
+          user = webArg(F("user"));
         }
-        if (web_server.arg(F("pass")).length() != 0) {
-          pass = web_server.arg(F("pass"));
+        if (webArg(F("pass")).length() != 0) {
+          pass = webArg(F("pass"));
         }
       }
 
       addFormTextBox(F("URL with settings"), F("url"), url, 256);
       addFormNote(F("Only HTTP supported. Do not include filename. URL is allowed to contain system variables."));
-      #ifdef USE_CUSTOM_PROVISIONING
+      #if FEATURE_CUSTOM_PROVISIONING
       addFormCheckBox(F("Store URL"), F("saveurl"), ResetFactoryDefaultPreference.saveURL());
       #endif
       addFormTextBox(F("User"), F("user"), user, 64);
       addFormPasswordBox(F("Pass"), F("pass"), pass, 64);
-      #ifdef USE_CUSTOM_PROVISIONING
+      #if FEATURE_CUSTOM_PROVISIONING
       addFormCheckBox(F("Store Credentials"), F("savecred"), ResetFactoryDefaultPreference.storeCredentials());
       #endif
     }
@@ -168,7 +168,7 @@ void handle_settingsarchive() {
     addRowLabel(F("Delete First"));
     addCheckBox(F("del"), ResetFactoryDefaultPreference.deleteFirst());
     addFormNote(F("Needed on filesystem with not enough free space. Use with care!"));
-    #ifdef USE_CUSTOM_PROVISIONING
+    #if FEATURE_CUSTOM_PROVISIONING
     addFormCheckBox(F("Allow Fetch by Command"), F("allowcommand"), ResetFactoryDefaultPreference.allowFetchByCommand());
     addFormNote(F("Fetch files via a command does need stored URL (+ credentials)"));
     #endif
@@ -205,7 +205,7 @@ void handle_settingsarchive() {
 // download filetype selectors
 // ********************************************************************************
 void addDownloadFiletypeCheckbox(FileType::Enum filetype, unsigned int filenr) {
-  String filetype_str = getFileName(filetype, filenr);
+  const String filetype_str = getFileName(filetype, filenr);
   String label        = F("Fetch ");
 
   label += filetype_str;
@@ -214,8 +214,7 @@ void addDownloadFiletypeCheckbox(FileType::Enum filetype, unsigned int filenr) {
 }
 
 void storeDownloadFiletypeCheckbox(FileType::Enum filetype, unsigned int filenr) {
-  String filetype_str = getFileName(filetype, filenr);
-  bool   isChecked    = isFormItemChecked(filetype_str);
+  const bool isChecked = isFormItemChecked(getFileName(filetype, filenr));
 
   switch (filetype) {
     case FileType::CONFIG_DAT: ResetFactoryDefaultPreference.fetchConfigDat(isChecked); break;
@@ -223,6 +222,7 @@ void storeDownloadFiletypeCheckbox(FileType::Enum filetype, unsigned int filenr)
     case FileType::NOTIFICATION_DAT: ResetFactoryDefaultPreference.fetchNotificationDat(isChecked); break;
     case FileType::RULES_TXT: { ResetFactoryDefaultPreference.fetchRulesTXT(filenr, isChecked); break; }
     case FileType::PROVISIONING_DAT: { ResetFactoryDefaultPreference.fetchProvisioningDat(isChecked); break; }
+    case FileType::FIRMWARE:  // FIXME TD-er: Still have to decide what to do with protecting firmware downloads
     case FileType::MAX_FILETYPE: 
       break;
     
@@ -241,4 +241,4 @@ bool tryDownloadFileType(const String& url, const String& user, const String& pa
   return false;
 }
 
-#endif // ifdef USE_SETTINGS_ARCHIVE
+#endif // if FEATURE_SETTINGS_ARCHIVE

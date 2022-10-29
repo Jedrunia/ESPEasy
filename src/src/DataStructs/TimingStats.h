@@ -1,15 +1,13 @@
 #ifndef DATASTRUCTS_TIMINGSTATS_H
 #define DATASTRUCTS_TIMINGSTATS_H
 
-#include "../DataTypes/ESPEasy_plugin_functions.h"
 #include "../../ESPEasy_common.h"
 
+#if FEATURE_TIMING_STATS
 
-#ifdef USES_TIMING_STATS
-
-#include "../Helpers/ESPEasy_time_calc.h"
-
+#include "../DataTypes/ESPEasy_plugin_functions.h"
 #include "../Globals/Settings.h"
+#include "../Helpers/ESPEasy_time_calc.h"
 
 # include <Arduino.h>
 # include <map>
@@ -32,7 +30,7 @@
 # define CPLUGIN_CALL_50PS       9
 # define SEND_DATA_STATS         10
 # define COMPUTE_FORMULA_STATS   11
-# define PROC_SYS_TIMER          12
+# define PLUGIN_CALL_DEVICETIMER_IN     12
 # define SET_NEW_TIMER           13
 # define TIME_DIFF_COMPUTE       14
 # define MQTT_DELAY_QUEUE        15
@@ -119,6 +117,10 @@ const __FlashStringHelper * getCPluginCFunctionName(CPlugin::Function function);
 bool   mustLogCFunction(CPlugin::Function function);
 String getMiscStatsName(int stat);
 
+void   stopTimerTask(int T, int F, uint64_t statisticsTimerStart);
+void   stopTimerController(int T, CPlugin::Function F, uint64_t statisticsTimerStart);
+void   stopTimer(int L, uint64_t statisticsTimerStart);
+void   addMiscTimerStat(int L, int64_t T);
 
 extern std::map<int, TimingStats> pluginStats;
 extern std::map<int, TimingStats> controllerStats;
@@ -126,18 +128,16 @@ extern std::map<int, TimingStats> miscStats;
 extern unsigned long timingstats_last_reset;
 
 # define START_TIMER const uint64_t statisticsTimerStart(getMicros64());
-# define STOP_TIMER_TASK(T, F) \
-  if (mustLogFunction(F)) pluginStats[(T) * 256 + (F)].add(usecPassedSince(statisticsTimerStart));
-# define STOP_TIMER_CONTROLLER(T, F) \
-  if (mustLogCFunction(F)) controllerStats[(T) * 256 + static_cast<int>(F)].add(usecPassedSince(statisticsTimerStart));
+# define STOP_TIMER_TASK(T, F) stopTimerTask(T, F, statisticsTimerStart);
+# define STOP_TIMER_CONTROLLER(T, F) stopTimerController(T, F, statisticsTimerStart);
 
 // #define STOP_TIMER_LOADFILE miscStats[LOADFILE_STATS].add(usecPassedSince(statisticsTimerStart));
-# define STOP_TIMER(L) if (Settings.EnableTimingStats()) { miscStats[L].add(usecPassedSince(statisticsTimerStart)); }
+# define STOP_TIMER(L) stopTimer(L, statisticsTimerStart);
 
 // Add a timer statistic value in usec.
-# define ADD_TIMER_STAT(L, T) if (Settings.EnableTimingStats()) { miscStats[L].add(T); }
+# define ADD_TIMER_STAT(L, T) addMiscTimerStat(L, T);
 
-#else // ifdef USES_TIMING_STATS
+#else // if FEATURE_TIMING_STATS
 
 # define START_TIMER ;
 # define STOP_TIMER_TASK(T, F) ;
@@ -151,6 +151,6 @@ extern unsigned long timingstats_last_reset;
 // Meaning we must make sure the forward declaration of the TimingStats class is made, since it is used as an argument in some function.
 class TimingStats;
 
-#endif // ifdef USES_TIMING_STATS
+#endif // if FEATURE_TIMING_STATS
 
 #endif // DATASTRUCTS_TIMINGSTATS_H

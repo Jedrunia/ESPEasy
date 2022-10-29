@@ -6,13 +6,20 @@
 #include "../DataTypes/SPI_options.h"
 #include "../Globals/Plugins.h"
 #include "../Globals/CPlugins.h"
+#include "../Helpers/Misc.h"
 
 #ifndef DATASTRUCTS_SETTINGSSTRUCT_CPP
 #define DATASTRUCTS_SETTINGSSTRUCT_CPP
 
 template<unsigned int N_TASKS>
-SettingsStruct_tmpl<N_TASKS>::SettingsStruct_tmpl() : ResetFactoryDefaultPreference(0) {
-  clearAll();
+SettingsStruct_tmpl<N_TASKS>::SettingsStruct_tmpl() : ResetFactoryDefaultPreference(0) { //-V730
+  clearMisc();
+  clearTimeSettings();
+  clearNotifications();
+  clearControllers();
+  clearTasks();
+  clearLogSettings();
+  clearUnitNameSettings();
   clearNetworkSettings();
 }
 
@@ -128,12 +135,18 @@ void SettingsStruct_tmpl<N_TASKS>::SendToHttp_ack(bool value) {
 
 template<unsigned int N_TASKS>
 bool SettingsStruct_tmpl<N_TASKS>::UseESPEasyNow() const {
+#ifdef USES_ESPEASY_NOW
   return bitRead(VariousBits1, 11);
+#else
+  return false;
+#endif
 }
 
 template<unsigned int N_TASKS>
 void SettingsStruct_tmpl<N_TASKS>::UseESPEasyNow(bool value) {
+#ifdef USES_ESPEASY_NOW
   bitWrite(VariousBits1, 11, value);
+#endif
 }
 
 template<unsigned int N_TASKS>
@@ -294,6 +307,28 @@ template<unsigned int N_TASKS>
 void SettingsStruct_tmpl<N_TASKS>::AllowOTAUnlimited(bool value) {
   bitWrite(VariousBits1, 26, value);
 }
+
+template<unsigned int N_TASKS>
+bool SettingsStruct_tmpl<N_TASKS>::SendToHTTP_follow_redirects() const {
+  return bitRead(VariousBits1, 27);
+}
+
+template<unsigned int N_TASKS>
+void SettingsStruct_tmpl<N_TASKS>::SendToHTTP_follow_redirects(bool value) {
+  bitWrite(VariousBits1, 27, value);
+}
+
+#if FEATURE_AUTO_DARK_MODE
+template<unsigned int N_TASKS>
+uint8_t SettingsStruct_tmpl<N_TASKS>::getCssMode() const {
+  return get2BitFromUL(VariousBits1, 28); // Also occupies bit 29!
+}
+
+template<unsigned int N_TASKS>
+void SettingsStruct_tmpl<N_TASKS>::setCssMode(uint8_t value) {
+  set2BitToUL(VariousBits1, 28, value); // Also occupies bit 29!
+}
+#endif // FEATURE_AUTO_DARK_MODE
 
 template<unsigned int N_TASKS>
 ExtTimeSource_e SettingsStruct_tmpl<N_TASKS>::ExtTimeSource() const {
@@ -484,21 +519,15 @@ void SettingsStruct_tmpl<N_TASKS>::clearMisc() {
   gratuitousARP(DEFAULT_GRATUITOUS_ARP);
   TolerantLastArgParse(DEFAULT_TOLERANT_LAST_ARG_PARSE);
   SendToHttp_ack(DEFAULT_SEND_TO_HTTP_ACK);
+  #ifdef USES_ESPEASY_NOW
+  UseESPEasyNow(DEFAULT_USE_ESPEASYNOW);
+  #else
+  UseESPEasyNow(false);
+  #endif
   ApDontForceSetup(DEFAULT_AP_DONT_FORCE_SETUP);
   DoNotStartAP(DEFAULT_DONT_ALLOW_START_AP);
 }
 
-template<unsigned int N_TASKS>
-void SettingsStruct_tmpl<N_TASKS>::clearAll() {
-  clearMisc();
-  clearTimeSettings();
-  clearNetworkSettings();
-  clearNotifications();
-  clearControllers();
-  clearTasks();
-  clearLogSettings();
-  clearUnitNameSettings();
-}
 
 template<unsigned int N_TASKS>
 void SettingsStruct_tmpl<N_TASKS>::clearTask(taskIndex_t task) {
@@ -664,7 +693,7 @@ bool SettingsStruct_tmpl<N_TASKS>::isI2CEnabled() const {
 
 template<unsigned int N_TASKS>
 bool SettingsStruct_tmpl<N_TASKS>::isEthernetPin(int8_t pin) const {
-  #ifdef HAS_ETHERNET
+  #if FEATURE_ETHERNET
   if (pin < 0) return false;
   if (NetworkMedium == NetworkMedium_t::Ethernet) {
     if (19 == pin) return true; // ETH TXD0
@@ -674,21 +703,21 @@ bool SettingsStruct_tmpl<N_TASKS>::isEthernetPin(int8_t pin) const {
     if (26 == pin) return true; // ETH RXD1
     if (27 == pin) return true; // ETH CRS_DV
   }
-  #endif
+  #endif // if FEATURE_ETHERNET
   return false;
 }
 
 
 template<unsigned int N_TASKS>
 bool SettingsStruct_tmpl<N_TASKS>::isEthernetPinOptional(int8_t pin) const {
-  #ifdef HAS_ETHERNET
+  #if FEATURE_ETHERNET
   if (pin < 0) return false;
   if (NetworkMedium == NetworkMedium_t::Ethernet) {
     if (ETH_Pin_mdc == pin) return true;
     if (ETH_Pin_mdio == pin) return true;
     if (ETH_Pin_power == pin) return true;
   }
-  #endif
+  #endif // if FEATURE_ETHERNET
   return false;
 }
 

@@ -24,7 +24,7 @@
 
 #define PLUGIN_050
 #define PLUGIN_ID_050         50
-#define PLUGIN_NAME_050       "Color - TCS34725  [TESTING]"
+#define PLUGIN_NAME_050       "Color - TCS34725"
 #define PLUGIN_VALUENAME1_050 "Red"
 #define PLUGIN_VALUENAME2_050 "Green"
 #define PLUGIN_VALUENAME3_050 "Blue"
@@ -53,6 +53,7 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
       Device[deviceCount].SendDataOption     = true;
       Device[deviceCount].TimerOption        = true;
       Device[deviceCount].GlobalSyncOption   = true;
+      Device[deviceCount].PluginStats        = true;
       break;
     }
 
@@ -268,7 +269,9 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
       }
 
       if (P050_data->tcs.begin()) {
+# ifndef BUILD_NO_DEBUG
         addLog(LOG_LEVEL_DEBUG, F("Found TCS34725 sensor"));
+#endif
 
         uint16_t r, g, b, c;
         float value4 = 0.0f;
@@ -474,7 +477,9 @@ boolean Plugin_050(uint8_t function, struct EventStruct *event, String& string)
 
         success = true;
       } else {
+# ifndef BUILD_NO_DEBUG
         addLog(LOG_LEVEL_DEBUG, F("No TCS34725 found"));
+#endif
         success = false;
       }
 

@@ -1,13 +1,11 @@
 #include "../DataStructs/TimingStats.h"
 
-#include "../../ESPEasy_common.h"
+#if FEATURE_TIMING_STATS
+
 #include "../DataTypes/ESPEasy_plugin_functions.h"
 #include "../Globals/CPlugins.h"
 #include "../Helpers/_CPlugin_Helper.h"
 #include "../Helpers/StringConverter.h"
-
-
-#ifdef USES_TIMING_STATS
 
 
 std::map<int, TimingStats> pluginStats;
@@ -87,14 +85,15 @@ const __FlashStringHelper * getPluginFunctionName(int function) {
     case PLUGIN_SERIAL_IN:             return F("SERIAL_IN");
     case PLUGIN_UDP_IN:                return F("UDP_IN");
     case PLUGIN_CLOCK_IN:              return F("CLOCK_IN");
-    case PLUGIN_TIMER_IN:              return F("TIMER_IN");
+    case PLUGIN_TASKTIMER_IN:          return F("TASKTIMER_IN");
     case PLUGIN_FIFTY_PER_SECOND:      return F("FIFTY_PER_SECOND");
     case PLUGIN_SET_CONFIG:            return F("SET_CONFIG");
     case PLUGIN_GET_DEVICEGPIONAMES:   return F("GET_DEVICEGPIONAMES");
     case PLUGIN_EXIT:                  return F("EXIT");
-    case PLUGIN_GET_CONFIG:            return F("GET_CONFIG");
+    case PLUGIN_GET_CONFIG_VALUE:      return F("GET_CONFIG");
     case PLUGIN_UNCONDITIONAL_POLL:    return F("UNCONDITIONAL_POLL");
     case PLUGIN_REQUEST:               return F("REQUEST");
+
   }
   return F("Unknown");
 }
@@ -121,12 +120,12 @@ bool mustLogFunction(int function) {
     case PLUGIN_SERIAL_IN:             return true;
     case PLUGIN_UDP_IN:                return true;
     case PLUGIN_CLOCK_IN:              return false;
-    case PLUGIN_TIMER_IN:              return true;
+    case PLUGIN_TASKTIMER_IN:          return true;
     case PLUGIN_FIFTY_PER_SECOND:      return true;
     case PLUGIN_SET_CONFIG:            return false;
     case PLUGIN_GET_DEVICEGPIONAMES:   return false;
     case PLUGIN_EXIT:                  return false;
-    case PLUGIN_GET_CONFIG:            return false;
+    case PLUGIN_GET_CONFIG_VALUE:      return false;
     case PLUGIN_UNCONDITIONAL_POLL:    return false;
     case PLUGIN_REQUEST:               return true;
   }
@@ -151,6 +150,7 @@ const __FlashStringHelper * getCPluginCFunctionName(CPlugin::Function function) 
     case CPlugin::Function::CPLUGIN_FIFTY_PER_SECOND:          return F("CPLUGIN_FIFTY_PER_SECOND");
     case CPlugin::Function::CPLUGIN_INIT_ALL:                  return F("CPLUGIN_INIT_ALL");
     case CPlugin::Function::CPLUGIN_EXIT:                      return F("CPLUGIN_EXIT");
+    case CPlugin::Function::CPLUGIN_WRITE:                     return F("CPLUGIN_WRITE");
 
     case CPlugin::Function::CPLUGIN_GOT_CONNECTED:
     case CPlugin::Function::CPLUGIN_GOT_INVALID:
@@ -182,6 +182,7 @@ bool mustLogCFunction(CPlugin::Function function) {
     case CPlugin::Function::CPLUGIN_FIFTY_PER_SECOND:          return true;
     case CPlugin::Function::CPLUGIN_INIT_ALL:                  return false;
     case CPlugin::Function::CPLUGIN_EXIT:                      return false;
+    case CPlugin::Function::CPLUGIN_WRITE:                     return true;
 
     case CPlugin::Function::CPLUGIN_GOT_CONNECTED:
     case CPlugin::Function::CPLUGIN_GOT_INVALID:
@@ -209,7 +210,7 @@ const __FlashStringHelper * getMiscStatsName_F(int stat) {
     case SENSOR_SEND_TASK:        return F("SensorSendTask()");
     case SEND_DATA_STATS:         return F("sendData()");
     case COMPUTE_FORMULA_STATS:   return F("Compute formula");
-    case PROC_SYS_TIMER:          return F("proc_system_timer()");
+    case PLUGIN_CALL_DEVICETIMER_IN:     return F("PLUGIN_DEVICETIMER_IN");
     case SET_NEW_TIMER:           return F("setNewTimerAt()");
     case TIME_DIFF_COMPUTE:       return F("timeDiff()");
     case MQTT_DELAY_QUEUE:        return F("Delay queue MQTT");
@@ -247,13 +248,31 @@ const __FlashStringHelper * getMiscStatsName_F(int stat) {
 
 String getMiscStatsName(int stat) {
   if (stat >= C001_DELAY_QUEUE && stat <= C025_DELAY_QUEUE) {
-    String result;
-    result.reserve(16);
-    result  = F("Delay queue ");
-    result += get_formatted_Controller_number(static_cast<cpluginID_t>(stat - C001_DELAY_QUEUE + 1));
-    return result;
+    return concat(
+      F("Delay queue "), 
+      get_formatted_Controller_number(static_cast<cpluginID_t>(stat - C001_DELAY_QUEUE + 1)));
   }
   return getMiscStatsName_F(stat);
 }
 
-#endif
+void stopTimerTask(int T, int F, uint64_t statisticsTimerStart)
+{
+  if (mustLogFunction(F)) pluginStats[(T) * 256 + (F)].add(usecPassedSince(statisticsTimerStart));
+}
+
+void stopTimerController(int T, CPlugin::Function F, uint64_t statisticsTimerStart)
+{
+  if (mustLogCFunction(F)) controllerStats[(T) * 256 + static_cast<int>(F)].add(usecPassedSince(statisticsTimerStart));
+}
+
+void stopTimer(int L, uint64_t statisticsTimerStart)
+{
+  if (Settings.EnableTimingStats()) { miscStats[L].add(usecPassedSince(statisticsTimerStart)); }
+}
+
+void addMiscTimerStat(int L, int64_t T)
+{
+  if (Settings.EnableTimingStats()) { miscStats[L].add(T); }
+}
+
+#endif // if FEATURE_TIMING_STATS

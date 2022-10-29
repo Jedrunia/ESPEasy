@@ -1,6 +1,8 @@
 #ifndef HELPERS_ESPEASY_TIME_H
 #define HELPERS_ESPEASY_TIME_H
 
+#include "../../ESPEasy_common.h"
+
 #include <Arduino.h>
 
 #include "../DataTypes/ESPEasyTimeSource.h"
@@ -16,8 +18,6 @@ public:
   struct tm   addSeconds(const struct tm& ts,
                          int              seconds,
                          bool             toLocalTime) const;
-  static void breakTime(unsigned long timeInput,
-                        struct tm   & tm);
 
   // Restore the last known system time
   // This may be useful to get some idea of what time it is.
@@ -36,7 +36,12 @@ public:
   void          setExternalTimeSource(double       time,
                                       timeSource_t source);
 
+  // Get unix time in seconds
   uint32_t      getUnixTime() const;
+
+  // Get unix time in seconds
+  // @param unix_time_frac  The fractional part
+  uint32_t      getUnixTime(uint32_t& unix_time_frac) const;
 
   void          initTime();
 
@@ -61,30 +66,17 @@ public:
 // Default date format example: 20161231 (YYYYMMDD)
 String getDateString(char delimiter = '\0') const;
 
-// Format given Date separated by the given delimiter
-// date format example with '-' delimiter: 2016-12-31 (YYYY-MM-DD)
-static String getDateString(const struct tm& ts, char delimiter);
-
 // Formats the current Time
 // Default time format example: 235959 (HHMMSS)
-String getTimeString(char delimiter = '\0', bool show_seconds=true) const;
+String getTimeString(char delimiter = '\0', bool show_seconds = true, char hour_prefix = '\0') const;
 
-String getTimeString_ampm(char delimiter = '\0', bool show_seconds=true) const;
-
-// returns the current Time separated by the given delimiter
-// time format example with ':' delimiter: 23:59:59 (HH:MM:SS)
-static String getTimeString(const struct tm& ts, char delimiter, bool am_pm, bool show_seconds);
-
+String getTimeString_ampm(char delimiter = '\0', bool show_seconds = true, char hour_prefix = '\0') const;
 
 
 
 String getDateTimeString(char dateDelimiter = '-', char timeDelimiter = ':',  char dateTimeDelimiter = ' ') const;
 String getDateTimeString_ampm(char dateDelimiter = '-', char timeDelimiter = ':',  char dateTimeDelimiter = ' ') const;
 
-// returns the current Date and Time separated by the given delimiter
-// if called like this: getDateTimeString('\0', '\0', '\0');
-// it will give back this: 20161231235959  (YYYYMMDDHHMMSS)
-static String getDateTimeString(const struct tm& ts, char dateDelimiter = '-', char timeDelimiter = ':',  char dateTimeDelimiter = ' ', bool am_pm = false);
 
 
 /********************************************************************************************\
@@ -196,7 +188,7 @@ public:
   struct tm sunRise;
   struct tm sunSet;
   timeSource_t timeSource = timeSource_t::No_time_source;
-  float timeWander = 0.0f;  // Clock instability in msec/second
+  float timeWander = 0.0f;  // Clock instability in ppm
   uint32_t lastTimeWanderCalculation = 0;
 
   uint8_t PrevMinutes = 0;

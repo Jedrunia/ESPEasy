@@ -6,7 +6,7 @@
 # include "../Helpers/Numerical.h"
 # include "../Helpers/RulesMatcher.h"
 # include "../WebServer/Markup_Forms.h"
-# include "../WebServer/WebServer.h"
+# include "../WebServer/ESPEasy_WebServer.h"
 # include "../WebServer/Markup.h"
 # include "../WebServer/HTML_wrappers.h"
 # include "../ESPEasyCore/ESPEasyRules.h"
@@ -36,9 +36,9 @@ bool P037_data_struct::loadSettings() {
       String tmp[1];
 
       LoadCustomTaskSettings(_taskIndex, tmp,
-                            1, 41, offset);
-      globalTopicPrefix  = std::move(tmp[0]);
-      offset += 41;
+                             1, 41, offset);
+      globalTopicPrefix = std::move(tmp[0]);
+      offset           += 41;
     }
 
 
@@ -51,34 +51,36 @@ bool P037_data_struct::loadSettings() {
 
 String P037_data_struct::saveSettings() {
   String res;
+
   if (_taskIndex < TASKS_MAX) {
     size_t offset = 0;
     res += SaveCustomTaskSettings(_taskIndex, mqttTopics,
-                           VARS_PER_TASK, 41, offset);
+                                  VARS_PER_TASK, 41, offset);
     offset += VARS_PER_TASK * 41;
 
     res += SaveCustomTaskSettings(_taskIndex, jsonAttributes,
-                           VARS_PER_TASK, 21, offset);
+                                  VARS_PER_TASK, 21, offset);
     offset += VARS_PER_TASK * 21;
 
     {
       String tmp[1];
       tmp[0] = globalTopicPrefix;
-      res += SaveCustomTaskSettings(_taskIndex, tmp,
-                            1, 41, offset);
+      res   += SaveCustomTaskSettings(_taskIndex, tmp,
+                                      1, 41, offset);
       offset += 41;
     }
 
 
     res += SaveCustomTaskSettings(_taskIndex, valueArray,
-                           P037_ARRAY_SIZE, 0, offset + 1);
+                                  P037_ARRAY_SIZE, 0, offset + 1);
   }
   return res;
 }
 
 String P037_data_struct::getFullMQTTTopic(uint8_t taskValueIndex) const {
   String topic;
-  if (taskValueIndex < VARS_PER_TASK && mqttTopics[taskValueIndex].length() > 0) {
+
+  if ((taskValueIndex < VARS_PER_TASK) && (mqttTopics[taskValueIndex].length() > 0)) {
     topic.reserve(globalTopicPrefix.length() + mqttTopics[taskValueIndex].length());
     topic = globalTopicPrefix;
     topic.trim();
@@ -88,9 +90,9 @@ String P037_data_struct::getFullMQTTTopic(uint8_t taskValueIndex) const {
   return topic;
 }
 
-
 bool P037_data_struct::shouldSubscribeToMQTTtopic(const String& topic) const {
-  if (topic.length() == 0) return false;
+  if (topic.length() == 0) { return false; }
+
   for (uint8_t x = 0; x < VARS_PER_TASK; x++)
   {
     if (topic.equalsIgnoreCase(getFullMQTTTopic(x))) {
@@ -124,8 +126,11 @@ void P037_data_struct::parseMappings() {
     _maxFilter = 0; // Initialize to empty
     #  endif // if P037_FILTER_SUPPORT
 
+    #  if P037_MAPPING_SUPPORT || P037_FILTER_SUPPORT
+    int8_t idx;
+    #  endif // if P037_MAPPING_SUPPORT || P037_FILTER_SUPPORT
     #  if P037_MAPPING_SUPPORT
-    int8_t idx = P037_MAX_MAPPINGS;
+    idx = P037_MAX_MAPPINGS;
 
     for (uint8_t mappingOffset = P037_END_MAPPINGS; mappingOffset >= P037_START_MAPPINGS && _maxIdx == 0; mappingOffset--) {
       if (!valueArray[mappingOffset].isEmpty()) {
@@ -178,7 +183,7 @@ bool P037_data_struct::webform_load(
   addFormSubHeader(F("Topic subscriptions"));
 
   // Global topic prefix
-  addFormTextBox(F("Prefix for all topics"), F("p037_topicprefix"), globalTopicPrefix, 40);
+  addFormTextBox(F("Prefix for all topics"), F("topicprefix"), globalTopicPrefix, 40);
 
   # ifdef P037_JSON_SUPPORT
 
@@ -200,27 +205,27 @@ bool P037_data_struct::webform_load(
       html_TR_TD();
       addHtml(F("&nbsp;"));
       addHtmlInt(varNr + 1);
-      html_TD();
-      id  = F("p037_template");
+      html_TD(F("padding-right: 8px"));
+      id  = F("template");
       id += (varNr + 1);
       addTextBox(id,
                  mqttTopics[varNr],
                  40,
-                 false, false, EMPTY_STRING, F("wide"));
-      html_TD();
-      id  = F("p037_attribute");
+                 false, false, EMPTY_STRING, F("xwide"));
+      html_TD(F("padding-right: 8px"));
+      id  = F("attribute");
       id += (varNr + 1);
       addTextBox(id,
                  jsonAttributes[varNr],
                  20,
-                 false, false, EMPTY_STRING, EMPTY_STRING);
+                 false, false, EMPTY_STRING, F("xwide"));
       html_TD();
     } else
     # endif // ifdef P037_JSON_SUPPORT
     {
       String label = F("MQTT Topic ");
       label += (varNr + 1);
-      id     = F("p037_template");
+      id     = F("template");
       id    += (varNr + 1);
       addFormTextBox(label, id, mqttTopics[varNr], 40);
     }
@@ -283,7 +288,7 @@ bool P037_data_struct::webform_load(
         html_TD();
         addTextBox(getPluginCustomArgName(idx + 100 + 0),
                    parseStringKeepCase(valueArray[filterOffset], 1, P037_VALUE_SEPARATOR),
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
       }
       {
         html_TD();
@@ -292,7 +297,7 @@ bool P037_data_struct::webform_load(
         html_TD();
 
         addTextBox(getPluginCustomArgName(idx + 100 + 2), parseStringKeepCase(valueArray[filterOffset], 3, P037_VALUE_SEPARATOR),
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
         addUnit(F("Range/List: separate values with ; "));
         html_TD();
       }
@@ -397,7 +402,7 @@ bool P037_data_struct::webform_load(
         html_TD();
         addTextBox(getPluginCustomArgName(idx + 0),
                    parseStringKeepCase(valueArray[mappingOffset], 1, P037_VALUE_SEPARATOR),
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
       }
       {
         html_TD();
@@ -406,7 +411,7 @@ bool P037_data_struct::webform_load(
         html_TD();
         addTextBox(getPluginCustomArgName(idx + 2),
                    parseStringKeepCase(valueArray[mappingOffset], 3, P037_VALUE_SEPARATOR),
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
         html_TD();
       }
       mapNr++;
@@ -434,14 +439,14 @@ bool P037_data_struct::webform_load(
         addHtmlInt(mapNr);
         html_TD();
         addTextBox(getPluginCustomArgName(idx + 0), EMPTY_STRING,
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
       }
       {
         html_TD();
         addSelector(getPluginCustomArgName(idx + 1), P037_OPERAND_COUNT, operandOptions, operandIndices, NULL, operandIndex);
         html_TD();
         addTextBox(getPluginCustomArgName(idx + 2), EMPTY_STRING,
-                   32, false, false, EMPTY_STRING, EMPTY_STRING);
+                   32, false, false, EMPTY_STRING, F(""));
         html_TD();
       }
       idx += 3;
@@ -475,7 +480,6 @@ bool P037_data_struct::webform_load(
   return success;
 } // webform_load
 
-
 bool P037_data_struct::webform_save(
   # if P037_FILTER_SUPPORT
   bool filterEnabled
@@ -495,26 +499,27 @@ bool P037_data_struct::webform_save(
 
   for (uint8_t varNr = 0; varNr < VARS_PER_TASK; varNr++)
   {
-    String argName = F("p037_template");
+    String argName = F("template");
     argName += (varNr + 1);
 
-    mqttTopics[varNr] = web_server.arg(argName);
+    mqttTopics[varNr] = webArg(argName);
 
     # ifdef P037_JSON_SUPPORT
 
     if (jsonEnabled) {
-      argName  = F("p037_attribute");
-      argName += (varNr + 1);
-      jsonAttributes[varNr] = web_server.arg(argName);
+      argName               = F("attribute");
+      argName              += (varNr + 1);
+      jsonAttributes[varNr] = webArg(argName);
     }
     # endif // P037_JSON_SUPPORT
   }
 
-  globalTopicPrefix = web_server.arg(F("p037_topicprefix"));
+  globalTopicPrefix = webArg(F("topicprefix"));
 
   # if P037_MAPPING_SUPPORT || P037_FILTER_SUPPORT
   String left, right;
   bool   firstError;
+  int8_t idx = 0;
   # endif // if P037_MAPPING_SUPPORT || P037_FILTER_SUPPORT
 
   // Mappings are processed first
@@ -522,16 +527,15 @@ bool P037_data_struct::webform_save(
   firstError = true;
   String  operands = P037_OPERAND_LIST;
   uint8_t mapNr    = 1;
-  int8_t  idx      = 0;
   left.reserve(32);
   right.reserve(32);
 
   for (uint8_t mappingOffset = P037_START_MAPPINGS; mappingOffset <= P037_END_MAPPINGS; mappingOffset++) {
     left.clear();
-    left +=  web_server.arg(getPluginCustomArgName(idx + 0));
+    left +=  webArg(getPluginCustomArgName(idx + 0));
     left.trim();
     right.clear();
-    right += web_server.arg(getPluginCustomArgName(idx + 2));
+    right += webArg(getPluginCustomArgName(idx + 2));
     right.trim();
 
     if (!left.isEmpty() || !right.isEmpty()) {
@@ -545,8 +549,7 @@ bool P037_data_struct::webform_save(
       valueArray[mappingOffset] = EMPTY_STRING;
     }
 
-    if ((left.isEmpty() && !right.isEmpty()) ||
-        (!left.isEmpty() && right.isEmpty())) {
+    if (left.isEmpty() != right.isEmpty()) {
       if (firstError) {
         error     += F("Name and value should both be filled for mapping ");
         firstError = false;
@@ -572,9 +575,9 @@ bool P037_data_struct::webform_save(
   idx = 0;
 
   for (uint8_t filterOffset = P037_START_FILTERS; filterOffset <= P037_END_FILTERS; filterOffset++) {
-    left =  web_server.arg(getPluginCustomArgName(idx + 100 + 0));
+    left =  webArg(getPluginCustomArgName(idx + 100 + 0));
     left.trim();
-    right = web_server.arg(getPluginCustomArgName(idx + 100 + 2));
+    right = webArg(getPluginCustomArgName(idx + 100 + 2));
     right.trim();
 
     if (!left.isEmpty() || !right.isEmpty()
@@ -592,8 +595,7 @@ bool P037_data_struct::webform_save(
       valueArray[filterOffset] = EMPTY_STRING;
     }
 
-    if ((left.isEmpty() && !right.isEmpty()) ||
-        (!left.isEmpty() && right.isEmpty())) {
+    if (left.isEmpty() != right.isEmpty()) {
       if (firstError) {
         error     += F("Name and value should both be filled for filter ");
         firstError = false;
@@ -656,14 +658,14 @@ String P037_data_struct::mapValue(const String& input, const String& attribute) 
 
   if (!input.isEmpty()) {
     parseMappings();
-    String operands = P037_OPERAND_LIST;
+    const String operands = P037_OPERAND_LIST;
 
     int8_t idx = 0;
 
     for (uint8_t mappingOffset = P037_START_MAPPINGS; mappingOffset <= P037_END_MAPPINGS && idx <= _maxIdx; mappingOffset++) {
-      String name = parseStringKeepCase(valueArray[mappingOffset], 1, P037_VALUE_SEPARATOR);
-      String oper = parseString(valueArray[mappingOffset], 2, P037_VALUE_SEPARATOR);
-      String valu = parseStringKeepCase(valueArray[mappingOffset], 3, P037_VALUE_SEPARATOR);
+      const String name = parseStringKeepCase(valueArray[mappingOffset], 1, P037_VALUE_SEPARATOR);
+      const String oper = parseString(valueArray[mappingOffset], 2, P037_VALUE_SEPARATOR);
+      const String valu = parseStringKeepCase(valueArray[mappingOffset], 3, P037_VALUE_SEPARATOR);
 
       if ((name == input) || ((!attribute.isEmpty()) && (name == attribute))) {
         int8_t operandIndex = operands.indexOf(oper);
@@ -987,7 +989,7 @@ bool P037_data_struct::parseJSONMessage(const String& message) {
   }
 
   if (nullptr != root) {
-    deserializeJson(*root, message.c_str());
+    deserializeJson(*root, message);
 
     if (!root->isNull()) {
       result = true;
