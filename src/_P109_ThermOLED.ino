@@ -43,6 +43,8 @@
    ------------------------------------------------------------------------------------------
    Copyleft Nagy Sándor 2018 - https://bitekmindenhol.blog.hu/
    ------------------------------------------------------------------------------------------
+   2022-12-08 tonhuisman: Add Relay invert state option, reorder config option Contrast
+                          Add setpoint delay option, switch relay after delay seconds
    2022-10-11 tonhuisman: Fix initialization issue for relay state when switching tasks
    2022-10-10 tonhuisman: Save pending thermo-settings on plugin exit (while waiting for the 30 seconds to have passed)
                           Always force Auto mode on plugin start, and timeout 0, reset timeout to 0 on mode change
@@ -110,6 +112,12 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    case PLUGIN_SET_DEFAULTS:
+    {
+      P109_CONFIG_RELAYPIN = -1; // Set to None
+      break;
+    }
+
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
     {
@@ -118,20 +126,28 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_I2C_GET_ADDRESS
+    case PLUGIN_I2C_GET_ADDRESS:
+    {
+      event->Par1 = P109_CONFIG_I2CADDRESS;
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_I2C_GET_ADDRESS
+
     # ifndef LIMIT_BUILD_SIZE
     case PLUGIN_WEBFORM_SHOW_GPIO_DESCR:
     {
-      string  = F("Btn L: ");
-      string += formatGpioLabel(CONFIG_PIN1, false);
-      string += event->String1; // newline
-      string += F("Btn R: ");
-      string += formatGpioLabel(CONFIG_PIN2, false);
-      string += event->String1; // newline
-      string += F("Btn M: ");
-      string += formatGpioLabel(CONFIG_PIN3, false);
-      string += event->String1; // newline
-      string += F("Relay: ");
-      string += formatGpioLabel(P109_CONFIG_RELAYPIN, false);
+      const char* separator = event->String1.c_str();
+      string = strformat(
+        F("Btn L: %s%sBtn R: %s%sBtn M: %s%sRelay: %s"),
+       formatGpioLabel(CONFIG_PIN1, false).c_str(),
+       separator,
+       formatGpioLabel(CONFIG_PIN2, false).c_str(),
+       separator,
+       formatGpioLabel(CONFIG_PIN3, false).c_str(),
+       separator,
+       formatGpioLabel(P109_CONFIG_RELAYPIN, false).c_str());
       success = true;
       break;
     }
@@ -142,6 +158,8 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
       OLedFormController(F("controller"), nullptr, P109_CONFIG_DISPLAYTYPE);
 
       OLedFormRotation(F("rotate"), P109_CONFIG_ROTATION);
+
+      OLedFormContrast(F("contrast"), P109_CONFIG_CONTRAST);
 
       {
         P109_data_struct *P109_data = new (std::nothrow) P109_data_struct();
@@ -158,7 +176,7 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
 
       addFormPinSelect(PinSelectPurpose::Generic_output, F("Relay"),            F("heatrelay"),      P109_CONFIG_RELAYPIN);
 
-      OLedFormContrast(F("contrast"), P109_CONFIG_CONTRAST);
+      addFormCheckBox(F("Invert relay-state (0=on, 1=off)"), F("invertrelay"), P109_GET_RELAY_INVERT);
 
       {
         const __FlashStringHelper *options4[] = { F("0.2"), F("0.5"), F("1") };
@@ -172,21 +190,29 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
         addFormCheckBox(F("Use Taskname instead of Sysname"), F("ptask"), P109_GET_TASKNAME_IN_TITLE == 1);
       }
 
+      {
+        if (P109_CONFIG_SETPOINT_DELAY == 0) { P109_CONFIG_SETPOINT_DELAY = P109_DEFAULT_SETPOINT_DELAY + P109_SETPOINT_OFFSET; }
+        addFormNumericBox(F("Delay on setpoint change"), F("setpdelay"), P109_CONFIG_SETPOINT_DELAY - P109_SETPOINT_OFFSET, 1, 10);
+        addUnit('s');
+      }
+
       success = true;
       break;
     }
 
     case PLUGIN_WEBFORM_SAVE:
     {
-      P109_CONFIG_I2CADDRESS  = getFormItemInt(F("pi2caddr"));
-      P109_CONFIG_ROTATION    = getFormItemInt(F("rotate"));
-      P109_CONFIG_DISPLAYTYPE = getFormItemInt(F("controller"));
-      P109_CONFIG_CONTRAST    = getFormItemInt(F("contrast"));
-      P109_CONFIG_RELAYPIN    = getFormItemInt(F("heatrelay"));
-      P109_CONFIG_HYSTERESIS  = (getFormItemInt(F("hyst")) / 10.0f);
+      P109_CONFIG_I2CADDRESS     = getFormItemInt(F("pi2caddr"));
+      P109_CONFIG_ROTATION       = getFormItemInt(F("rotate"));
+      P109_CONFIG_DISPLAYTYPE    = getFormItemInt(F("controller"));
+      P109_CONFIG_CONTRAST       = getFormItemInt(F("contrast"));
+      P109_CONFIG_RELAYPIN       = getFormItemInt(F("heatrelay"));
+      P109_CONFIG_HYSTERESIS     = (getFormItemInt(F("hyst")) / 10.0f);
+      P109_CONFIG_SETPOINT_DELAY = getFormItemInt(F("setpdelay")) + P109_SETPOINT_OFFSET;
       uint32_t lSettings = 0u;
       bitWrite(lSettings, P109_FLAG_TASKNAME_IN_TITLE, isFormItemChecked(F("ptask")));
       bitWrite(lSettings, P109_FLAG_ALTERNATE_HEADER,  !isFormItemChecked(F("palt"))); // Inverted
+      bitWrite(lSettings, P109_FLAG_RELAY_INVERT,      isFormItemChecked(F("invertrelay")));
       P109_FLAGS = lSettings;
 
       {
@@ -208,6 +234,7 @@ boolean Plugin_109(uint8_t function, struct EventStruct *event, String& string)
       P109_data_struct *P109_data = static_cast<P109_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr != P109_data) {
+        if (P109_CONFIG_SETPOINT_DELAY == 0) { P109_CONFIG_SETPOINT_DELAY = P109_DEFAULT_SETPOINT_DELAY + P109_SETPOINT_OFFSET; }
         success = P109_data->plugin_init(event); // Start plugin
       }
 

@@ -67,7 +67,7 @@ boolean Plugin_100(uint8_t function, struct EventStruct *event, String& string)
         // Counter select
         const __FlashStringHelper * resultsOptions[2]      = { F("A"), F("B") };
         int    resultsOptionValues[2] = { 0, 1 };
-        addFormSelector(F("Counter"), F("p100_counter"), 2, resultsOptions, resultsOptionValues, PCONFIG(0));
+        addFormSelector(F("Counter"), F("counter"), 2, resultsOptions, resultsOptionValues, PCONFIG(0));
         addFormNote(F("Counter value is incremental"));
       }
       success = true;
@@ -77,7 +77,7 @@ boolean Plugin_100(uint8_t function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_SAVE:
     {
       // Counter choice
-      PCONFIG(0) = getFormItemInt(F("p100_counter"));
+      PCONFIG(0) = getFormItemInt(F("counter"));
 
       // 1-wire device address
       Dallas_addr_selector_webform_save(event->TaskIndex, CONFIG_PIN1, CONFIG_PIN1);
@@ -88,7 +88,6 @@ boolean Plugin_100(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SHOW_CONFIG:
     {
-      LoadTaskSettings(event->TaskIndex);
       uint8_t addr[8];
       Dallas_plugin_get_addr(addr, event->TaskIndex);
       string  = Dallas_format_address(addr);
@@ -98,9 +97,9 @@ boolean Plugin_100(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
     {
-      UserVar[event->BaseVarIndex]     = 0;
-      UserVar[event->BaseVarIndex + 1] = 0;
-      UserVar[event->BaseVarIndex + 2] = 0;
+      UserVar.setFloat(event->TaskIndex, 0, 0);
+      UserVar.setFloat(event->TaskIndex, 1, 0);
+      UserVar.setFloat(event->TaskIndex, 2, 0);
 
       if (validGpio(CONFIG_PIN1)) {
         // Explicitly set the pinMode using the "slow" pinMode function
@@ -123,16 +122,16 @@ boolean Plugin_100(uint8_t function, struct EventStruct *event, String& string)
 
           if (Dallas_readCounter(addr, &value, CONFIG_PIN1, CONFIG_PIN1, PCONFIG(0)))
           {
-            UserVar[event->BaseVarIndex] = UserVar[event->BaseVarIndex + 2] != 0
+            UserVar.setFloat(event->TaskIndex, 0, UserVar[event->BaseVarIndex + 2] != 0
               ? value - UserVar[event->BaseVarIndex + 1]
-              : 0;
-            UserVar[event->BaseVarIndex + 2] = 1;
-            UserVar[event->BaseVarIndex + 1] = value;
+              : 0);
+            UserVar.setFloat(event->TaskIndex, 2, 1);
+            UserVar.setFloat(event->TaskIndex, 1, value);
             success                          = true;
           }
           else
           {
-            UserVar[event->BaseVarIndex] = NAN;
+            UserVar.setFloat(event->TaskIndex, 0, NAN);
           }
 
           if (loglevelActiveFor(LOG_LEVEL_INFO)) {

@@ -53,9 +53,6 @@
 # define P003_CT_INDEX_TOTAL                2
 # define P003_CT_INDEX_COUNTER_TOTAL        3
 
-bool validIntFromString(const String& tBuf,
-                        int         & result);
-
 
 boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 {
@@ -77,7 +74,7 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
       Device[deviceCount].TimerOption        = true;
       Device[deviceCount].GlobalSyncOption   = true;
       Device[deviceCount].PluginStats        = true;
-      Device[deviceCount].PluginLogsPeaks    = true;
+      Device[deviceCount].TaskLogsOwnPeaks   = true;
       break;
     }
 
@@ -103,13 +100,13 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      addFormNumericBox(F("Debounce Time (mSec)"), F("p003_debounce")
+      addFormNumericBox(F("Debounce Time (mSec)"), F("debounce")
                         , PCONFIG(P003_IDX_DEBOUNCETIME));
 
       {
         uint8_t choice  = PCONFIG(P003_IDX_COUNTERTYPE);
         const __FlashStringHelper *options[P003_NR_COUNTERTYPES] = P003_COUNTERTYPE_LIST;
-        addFormSelector(F("Counter Type"), F("p003_countertype"), P003_NR_COUNTERTYPES, options, nullptr, choice);
+        addFormSelector(F("Counter Type"), F("countertype"), P003_NR_COUNTERTYPES, options, nullptr, choice);
         if (choice != 0) {
           addHtml(F("<span style=\"color:red\">Total count is not persistent!</span>"));
         }
@@ -117,7 +114,7 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 
       Internal_GPIO_pulseHelper::addGPIOtriggerMode(
         F("Mode Type"), 
-        F("p003_raisetype"), 
+        F("raisetype"), 
         static_cast<Internal_GPIO_pulseHelper::GPIOtriggerMode>(PCONFIG(P003_IDX_MODETYPE)));
 
       success = true;
@@ -126,9 +123,9 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
-      PCONFIG(P003_IDX_DEBOUNCETIME) = getFormItemInt(F("p003_debounce"));
-      PCONFIG(P003_IDX_COUNTERTYPE)  = getFormItemInt(F("p003_countertype"));
-      PCONFIG(P003_IDX_MODETYPE)     = getFormItemInt(F("p003_raisetype"));
+      PCONFIG(P003_IDX_DEBOUNCETIME) = getFormItemInt(F("debounce"));
+      PCONFIG(P003_IDX_COUNTERTYPE)  = getFormItemInt(F("countertype"));
+      PCONFIG(P003_IDX_MODETYPE)     = getFormItemInt(F("raisetype"));
       success                        = true;
       break;
     }
@@ -137,7 +134,7 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
     {
       Internal_GPIO_pulseHelper::pulseCounterConfig config;
       config.setDebounceTime(PCONFIG(P003_IDX_DEBOUNCETIME));
-      config.gpio             = Settings.TaskDevicePin1[event->TaskIndex];
+      config.gpio             = CONFIG_PIN1;
       config.taskIndex        = event->TaskIndex;
       config.interruptPinMode = static_cast<Internal_GPIO_pulseHelper::GPIOtriggerMode>(PCONFIG(P003_IDX_MODETYPE));
       config.pullupPinMode    = Settings.TaskDevicePin1PullUp[event->TaskIndex] ? INPUT_PULLUP : INPUT;
@@ -183,16 +180,11 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
         }
 
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-          String log; 
-          if (log.reserve(20)) {
-            log += F("INIT : PulsePin: "); 
-            log += Settings.TaskDevicePin1[event->TaskIndex];
-            addLogMove(LOG_LEVEL_INFO, log);
-          }
+          addLogMove(LOG_LEVEL_INFO, strformat(F("INIT : PulsePin: %d"), CONFIG_PIN1));
         }
 
         // set up device pin and estabish interupt handlers
-        P003_data->pulseHelper.init();
+        success = P003_data->pulseHelper.init();
       }
       break;
     }
@@ -211,13 +203,14 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 
         // store the current counter values into UserVar (RTC-memory)
         // FIXME TD-er: Is it correct to write the first 3  UserVar values, regardless the set counter type?
-        UserVar[event->BaseVarIndex + P003_IDX_pulseCounter]      = pulseCounter;
-        UserVar[event->BaseVarIndex + P003_IDX_pulseTotalCounter] = pulseCounterTotal;
-        UserVar[event->BaseVarIndex + P003_IDX_pulseTime]         = pulseTime_msec;
+        // FIXME TD-er: Must check we're interacting with the raw values in this PulseCounter plugin
+        UserVar.setFloat(event->TaskIndex, P003_IDX_pulseCounter      , pulseCounter);
+        UserVar.setFloat(event->TaskIndex, P003_IDX_pulseTotalCounter , pulseCounterTotal);
+        UserVar.setFloat(event->TaskIndex, P003_IDX_pulseTime         , pulseTime_msec);
 
         // Store the raw value in the unused 4th position.
         // This is needed to restore the value from RTC as it may be converted into another output value using a formula.
-        UserVar[event->BaseVarIndex + P003_IDX_persistedTotalCounter] = pulseCounterTotal;
+        UserVar.setFloat(event->TaskIndex, P003_IDX_persistedTotalCounter, pulseCounterTotal);
 
         switch (PCONFIG(P003_IDX_COUNTERTYPE))
         {
@@ -252,8 +245,8 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
         const String command      = parseString(string, 1);
         bool   mustCallPluginRead = false;
 
-        const bool cmd_resetpulsecounter    = command.equals(F("resetpulsecounter"));
-        const bool cmd_setpulsecountertotal = command.equals(F("setpulsecountertotal"));
+        const bool cmd_resetpulsecounter    = equals(command, F("resetpulsecounter"));
+        const bool cmd_setpulsecountertotal = equals(command, F("setpulsecountertotal"));
 
         if (cmd_resetpulsecounter || cmd_setpulsecountertotal)
         {
@@ -274,7 +267,7 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
             break;
           }
 
-          int par1 = 0;
+          int32_t par1 = 0;
 
           if (cmd_setpulsecountertotal) {
             if (!validIntFromString(parseString(string, 2), par1)) { break; }
@@ -294,7 +287,7 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
 
           success = true;
         }
-        else if (command.equals(F("logpulsestatistic")))
+        else if (equals(command, F("logpulsestatistic")))
         {
           # ifdef PULSE_STATISTIC
 
@@ -307,8 +300,8 @@ boolean Plugin_003(uint8_t function, struct EventStruct *event, String& string)
           //       i = increase the log level for regular statstic logs to "info"
 
           const String subcommand = parseString(string, 2);
-          const bool sub_i = subcommand.equals(F("i"));
-          const bool sub_r = subcommand.equals(F("r"));
+          const bool sub_i = equals(subcommand, F("i"));
+          const bool sub_r = equals(subcommand, F("r"));
 
           if ((sub_i) || (sub_r) || (subcommand.isEmpty())) {
             P003_data->pulseHelper.doStatisticLogging(P003_PULSE_STATS_ADHOC_LOG_LEVEL);

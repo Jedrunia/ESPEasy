@@ -49,7 +49,7 @@
 struct P108_data_struct : public PluginTaskData_base {
   P108_data_struct() = default;
 
-  ~P108_data_struct();
+  virtual ~P108_data_struct();
 
   void reset();
 
@@ -60,7 +60,9 @@ struct P108_data_struct : public PluginTaskData_base {
             unsigned int      baudrate,
             uint8_t           modbusAddress);
 
-  bool isInitialized() const;
+  bool isInitialized() const {
+      return modbus.isInitialized();
+  }
 
   ModbusRTU_struct modbus;
 };

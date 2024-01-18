@@ -21,11 +21,13 @@
 # define P073_OPTION_RIGHTALIGN  2 // Align 7dt output right on MAX7219 display
 # define P073_OPTION_SCROLLTEXT  3 // Scroll text > 8 characters
 # define P073_OPTION_SCROLLFULL  4 // Scroll text from the right in, starting with a blank display
+# define P073_OPTION_SUPPRESS0   5 // Suppress leading zero on day/hour of Date/Time display
 
 # define P073_7DDT_COMMAND         // Enable 7ddt by default
 # define P073_EXTRA_FONTS          // Enable extra fonts
 # define P073_SCROLL_TEXT          // Enable scrolling of 7dtext by default
 # define P073_7DBIN_COMMAND        // Enable input of binary data via 7dbin,uint8_t,... command
+# define P073_SUPPRESS_ZERO        // Enable Suppress leading zero on day/hour
 
 # ifndef PLUGIN_SET_COLLECTION
 
@@ -35,6 +37,7 @@
 #  undef P073_EXTRA_FONTS   // Optionally activate if .bin file space is really problematic, to remove the font selection and 7dfont command
 #  undef P073_SCROLL_TEXT   // Optionally activate if .bin file space is really problematic, to remove the scrolling text feature
 #  undef P073_7DBIN_COMMAND // Optionally activate if .bin file space is really problematic, to remove the 7dbin command
+#  undef P073_SUPPRESS_ZERO // Optionally activate if .bin file space is really problematic, to remove the Suppress leading zero feature
 # endif // ifndef PLUGIN_SET_COLLECTION
 
 # define TM1637_POWER_ON    B10001000
@@ -140,17 +143,22 @@ static const uint8_t Dseg7CharTable[42] PROGMEM = {
 struct P073_data_struct : public PluginTaskData_base {
 public:
 
-  P073_data_struct();
+  P073_data_struct()          = default;
+  virtual ~P073_data_struct() = default;
 
-  void FillBufferWithTime(boolean sevendgt_now,
+  void init(struct EventStruct *event);
+
+  void FillBufferWithTime(bool    sevendgt_now,
                           uint8_t sevendgt_hours,
                           uint8_t sevendgt_minutes,
                           uint8_t sevendgt_seconds,
-                          boolean flag12h);
-  void FillBufferWithDate(boolean sevendgt_now,
+                          bool    flag12h,
+                          bool    suppressLeading0);
+  void FillBufferWithDate(bool    sevendgt_now,
                           uint8_t sevendgt_day,
                           uint8_t sevendgt_month,
-                          int     sevendgt_year);
+                          int     sevendgt_year,
+                          bool    suppressLeading0);
   void FillBufferWithNumber(const String& number);
   void FillBufferWithTemp(long temperature);
   # ifdef P073_7DDT_COMMAND
@@ -164,9 +172,11 @@ public:
   # ifdef P073_SCROLL_TEXT
   uint8_t getBufferLength(uint8_t displayModel);
   int     getEffectiveTextLength(const String& text);
-  void    NextScroll();
+  bool    NextScroll();
   void    setTextToScroll(const String& text);
   void    setScrollSpeed(uint8_t speed);
+  bool    isScrollEnabled();
+  void    setScrollEnabled(bool scroll);
   # endif // ifdef P073_SCROLL_TEXT
   # ifdef P073_7DBIN_COMMAND
   void    setBinaryData(const String& data);
@@ -178,37 +188,40 @@ public:
   void    ClearBuffer();
 
   uint8_t mapCharToFontPosition(char    character,
-                                     uint8_t fontset);
+                                uint8_t fontset);
   uint8_t mapMAX7219FontToTM1673Font(uint8_t character);
   uint8_t tm1637_getFontChar(uint8_t index,
                              uint8_t fontset);
 
-  int     dotpos        = 0;
-  uint8_t showbuffer[8] = { 0 };
-  bool    showperiods[8];
-  uint8_t spidata[2] = { 0 };
-  uint8_t pin1, pin2, pin3;
-  uint8_t displayModel;
-  uint8_t output;
-  uint8_t brightness;
-  bool    timesep;
-  bool    shift;
-  bool    periods;
-  bool    hideDegree;
-  bool    rightAlignTempMAX7219;
-  uint8_t fontset;
+  int     dotpos                = -1;
+  uint8_t showbuffer[8]         = { 0 };
+  bool    showperiods[8]        = { 0 };
+  uint8_t spidata[2]            = { 0 };
+  int8_t  pin1                  = -1;
+  int8_t  pin2                  = -1;
+  int8_t  pin3                  = -1;
+  uint8_t displayModel          = 0;
+  uint8_t output                = 0;
+  uint8_t brightness            = 0;
+  bool    timesep               = false;
+  bool    shift                 = false;
+  bool    periods               = false;
+  bool    hideDegree            = false;
+  bool    rightAlignTempMAX7219 = false;
+  uint8_t fontset               = 0;
   # ifdef P073_7DBIN_COMMAND
-  bool binaryData;
+  bool binaryData = false;
   # endif // P073_7DBIN_COMMAND
   # ifdef P073_SCROLL_TEXT
-  bool     txtScrolling;
-  uint16_t scrollCount;
-  uint16_t scrollPos;
-  bool     scrollFull;
+  bool     txtScrolling  = false;
+  bool     scrollAllowed = false;
+  uint16_t scrollCount   = 0;
+  uint16_t scrollPos     = 0;
+  bool     scrollFull    = false;
 
 private:
 
-  uint16_t _scrollSpeed;
+  uint16_t _scrollSpeed = 0;
   # endif // P073_SCROLL_TEXT
   # if defined(P073_SCROLL_TEXT) || defined(P073_7DBIN_COMMAND)
   String _textToScroll;

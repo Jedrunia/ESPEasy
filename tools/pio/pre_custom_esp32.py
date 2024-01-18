@@ -52,6 +52,10 @@ else:
     "-DUSES_P097",  # Touch (ESP32)
     "-DUSES_P106",  # BME680
     "-DUSES_P107",  # SI1145 UV index
+    "-DUSES_P131",  # NeoPixelMatrix
+
+    "-DUSES_P146",  # Cache Reader
+    
 
     "-DUSES_C016",  # Cache Controller
     "-DUSES_C018",  # TTN/RN2483
@@ -65,9 +69,13 @@ else:
     "-DFEATURE_PLUGIN_STATS=1",
     "-DFEATURE_CHART_JS=1",
 
+    "-DTESTING_FEATURE_USE_IPV6",
+
     "-DFEATURE_SETTINGS_ARCHIVE=1",
+    "-DFEATURE_DEFINE_SERIAL_CONSOLE_PORT=0",
     "-DFEATURE_ESPEASY_P2P=1",
-    "-DFEATURE_CUSTOM_PROVISIONING=1"
+    "-DFEATURE_CUSTOM_PROVISIONING=1",
+    "-DDISABLE_SC16IS752_SPI"
   ]
 
 

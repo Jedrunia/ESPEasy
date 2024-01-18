@@ -16,10 +16,13 @@
 #include "../Helpers/ESPEasyRTC.h"
 #include "../Helpers/ESPEasy_time_calc.h"
 #include "../Helpers/I2C_access.h"
-#include "../Helpers/Hardware.h"
 #include "../Helpers/Misc.h"
 #include "../Helpers/Networking.h"
 #include "../Helpers/PeriodicalActions.h"
+#include "../Helpers/StringConverter.h"
+
+
+#include "../Commands/InternalCommands_decoder.h"
 
 void updateLoopStats() {
   ++loopCounter;
@@ -32,7 +35,7 @@ void updateLoopStats() {
   const int64_t usecSince = usecPassedSince(lastLoopStart);
 
   #if FEATURE_TIMING_STATS
-  miscStats[LOOP_STATS].add(usecSince);
+  ADD_TIMER_STAT(LOOP_STATS, usecSince);
   #endif // if FEATURE_TIMING_STATS
 
   loop_usec_duration_total += usecSince;
@@ -85,6 +88,10 @@ void ESPEasy_loop()
       eventQueue.addMove(std::move(event));
     }
 
+#ifndef BUILD_NO_DEBUG
+    checkAll_internalCommands();
+#endif
+
 
     RTC.bootFailedCount = 0;
     saveToRTC();
@@ -92,7 +99,7 @@ void ESPEasy_loop()
     sendSysInfoUDP(1);
     #endif
   }
-
+#if FEATURE_CLEAR_I2C_STUCK
   if (Settings.EnableClearHangingI2Cbus())
   {
     // Check I2C bus to see if it needs to be cleared.
@@ -126,13 +133,16 @@ void ESPEasy_loop()
         break;
     }
   }
+#endif
 
 
   // Work around for nodes that do not have WiFi connection for a long time and may reboot after N unsuccessful connect attempts
-  if (getUptimeMinutes() > 2) {
+  static bool bootFailedCountReset = false;
+  if (getUptimeMinutes() > 2 && !bootFailedCountReset) {
     // Apparently the uptime is already a few minutes. Let's consider it a successful boot.
     RTC.bootFailedCount = 0;
     saveToRTC();
+    bootFailedCountReset = true;
   }
 
   // Deep sleep mode, just run all tasks one (more) time and go back to sleep as fast as possible

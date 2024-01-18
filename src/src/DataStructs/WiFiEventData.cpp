@@ -3,18 +3,13 @@
 #include "../ESPEasyCore/ESPEasy_Log.h"
 
 #include "../Globals/RTC.h"
-#include "../Globals/SecuritySettings.h"
 #include "../Globals/WiFi_AP_Candidates.h"
 
 #include "../Helpers/ESPEasy_Storage.h"
+#include "../Helpers/Networking.h"
 
 
-// Bit numbers for WiFi status
-#define ESPEASY_WIFI_CONNECTED               0
-#define ESPEASY_WIFI_GOT_IP                  1
-#define ESPEASY_WIFI_SERVICES_INITIALIZED    2
-
-#define WIFI_RECONNECT_WAIT                  20000  // in milliSeconds
+#define WIFI_RECONNECT_WAIT                  30000  // in milliSeconds
 
 #define CONNECT_TIMEOUT_MAX                  4000   // in milliSeconds
 
@@ -28,6 +23,7 @@ bool WiFiEventData_t::WiFiConnectAllowed() const {
     }
   }
   if (!wifiConnectAttemptNeeded) return false;
+  if (intent_to_reboot) return false;
   if (wifiSetupConnect) return true;
   if (wifiConnectInProgress) {
     if (last_wifi_connect_attempt_moment.isSet() && 
@@ -45,7 +41,11 @@ bool WiFiEventData_t::WiFiConnectAllowed() const {
 }
 
 bool WiFiEventData_t::unprocessedWifiEvents() const {
-  if (processedConnect && processedDisconnect && processedGotIP && processedDHCPTimeout)
+  if (processedConnect && processedDisconnect && processedGotIP && processedDHCPTimeout
+#if FEATURE_USE_IPV6
+      && processedGotIP6
+#endif
+  )
   {
     return false;
   }
@@ -93,9 +93,13 @@ void WiFiEventData_t::markWiFiTurnOn() {
 
 void WiFiEventData_t::clear_processed_flags() {
   // Mark all flags to default to prevent handling old events.
+  WiFi.scanDelete();
   processedConnect          = true;
   processedDisconnect       = true;
   processedGotIP            = true;
+  #if FEATURE_USE_IPV6
+  processedGotIP6           = true;
+  #endif
   processedDHCPTimeout      = true;
   processedConnectAPmode    = true;
   processedDisconnectAPmode = true;
@@ -103,6 +107,8 @@ void WiFiEventData_t::clear_processed_flags() {
   wifiConnectAttemptNeeded  = true;
   wifiConnectInProgress     = false;
   processingDisconnect.clear();
+  dns0_cache = IPAddress();
+  dns1_cache = IPAddress();
 }
 
 void WiFiEventData_t::markWiFiBegin() {
@@ -116,30 +122,22 @@ void WiFiEventData_t::markWiFiBegin() {
   }
 }
 
-bool WiFiEventData_t::WiFiDisconnected() const {
-  return wifiStatus == ESPEASY_WIFI_DISCONNECTED;
-}
-
-bool WiFiEventData_t::WiFiGotIP() const {
-  return bitRead(wifiStatus, ESPEASY_WIFI_GOT_IP);
-}
-
-bool WiFiEventData_t::WiFiConnected() const {
-  return bitRead(wifiStatus, ESPEASY_WIFI_CONNECTED);
-}
-
-bool WiFiEventData_t::WiFiServicesInitialized() const {
-  return bitRead(wifiStatus, ESPEASY_WIFI_SERVICES_INITIALIZED);
-}
 
 void WiFiEventData_t::setWiFiDisconnected() {
-  wifiConnectInProgress = false;
   wifiStatus            = ESPEASY_WIFI_DISCONNECTED;
+  last_wifi_connect_attempt_moment.clear();
+  wifiConnectInProgress = false;
 }
 
 void WiFiEventData_t::setWiFiGotIP() {
   bitSet(wifiStatus, ESPEASY_WIFI_GOT_IP);
   processedGotIP = true;
+  if (valid_DNS_address(WiFi.dnsIP(0))) {
+    dns0_cache = WiFi.dnsIP(0);
+  }
+  if (valid_DNS_address(WiFi.dnsIP(1))) {
+    dns1_cache = WiFi.dnsIP(1);
+  }
 }
 
 void WiFiEventData_t::setWiFiConnected() {
@@ -155,6 +153,8 @@ void WiFiEventData_t::setWiFiServicesInitialized() {
     bitSet(wifiStatus, ESPEASY_WIFI_SERVICES_INITIALIZED);
     wifiConnectInProgress = false;
     wifiConnectAttemptNeeded = false;
+    dns0_cache = WiFi.dnsIP(0);
+    dns1_cache = WiFi.dnsIP(1);
   }
 }
 
@@ -167,6 +167,14 @@ void WiFiEventData_t::markGotIP() {
   bitClear(wifiStatus, ESPEASY_WIFI_SERVICES_INITIALIZED);
   processedGotIP = false;
 }
+
+#if FEATURE_USE_IPV6
+  void WiFiEventData_t::markGotIPv6(const IPAddress& ip6) {
+    processedGotIP6 = false;
+    unprocessed_IP6 = ip6;
+  }
+#endif
+
 
 void WiFiEventData_t::markLostIP() {
   bitClear(wifiStatus, ESPEASY_WIFI_GOT_IP);
@@ -188,7 +196,10 @@ void WiFiEventData_t::markDisconnect(WiFiDisconnectReason reason) {
     // There was an unsuccessful connection attempt
     lastConnectedDuration_us = last_wifi_connect_attempt_moment.timeDiff(lastDisconnectMoment);
   } else {
-    lastConnectedDuration_us = lastConnectMoment.timeDiff(lastDisconnectMoment);
+    if (last_wifi_connect_attempt_moment.isSet())
+      lastConnectedDuration_us = lastConnectMoment.timeDiff(lastDisconnectMoment);
+    else 
+      lastConnectedDuration_us = 0;
   }
   lastDisconnectReason = reason;
   processedDisconnect  = false;
@@ -223,9 +234,6 @@ void WiFiEventData_t::markDisconnectedAPmode(const uint8_t mac[6]) {
   processedDisconnectAPmode = false;
 }
 
-void WiFiEventData_t::setAuthMode(uint8_t newMode) {
-  auth_mode = newMode;
-}
 
 
 String WiFiEventData_t::ESPeasyWifiStatusToString() const {

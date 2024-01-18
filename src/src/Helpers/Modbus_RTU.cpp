@@ -1,17 +1,17 @@
 #include "../Helpers/Modbus_RTU.h"
 
+#if FEATURE_MODBUS
 
 #include "../ESPEasyCore/ESPEasy_Log.h"
 #include "../Helpers/ESPEasy_time_calc.h"
 #include "../Helpers/StringConverter.h"
 
 
-ModbusRTU_struct::ModbusRTU_struct() : easySerial(nullptr) {
-  reset();
-}
-
 ModbusRTU_struct::~ModbusRTU_struct() {
-  reset();
+  if (easySerial != nullptr) {
+    delete easySerial;
+    easySerial = nullptr;
+  }
 }
 
 void ModbusRTU_struct::reset() {
@@ -45,7 +45,13 @@ bool ModbusRTU_struct::init(const ESPEasySerialPort port, const int16_t serial_r
     return false;
   }
   reset();
-  easySerial = new (std::nothrow) ESPeasySerial(port, serial_rx, serial_tx);
+  {
+    # ifdef USE_SECOND_HEAP
+    HeapSelectDram ephemeral;
+    # endif // ifdef USE_SECOND_HEAP
+
+    easySerial = new (std::nothrow) ESPeasySerial(port, serial_rx, serial_tx);
+  }
   if (easySerial == nullptr) { return false; }
   easySerial->begin(baudrate);
 
@@ -775,3 +781,5 @@ void ModbusRTU_struct::startRead() {
     digitalWrite(_dere_pin, LOW);
   }
 }
+
+#endif

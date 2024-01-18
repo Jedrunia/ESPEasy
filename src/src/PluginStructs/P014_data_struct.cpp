@@ -16,9 +16,7 @@ bool P014_data_struct::startInit(uint8_t i2caddr)
   uint8_t ret = I2C_wakeup(i2caddr);
   if (ret){
     if (loglevelActiveFor(LOG_LEVEL_ERROR)){
-      String log = F("SI70xx : Not available at address: ");
-      log += String(i2caddr, HEX);
-      addLog(LOG_LEVEL_ERROR, log);
+      addLogMove(LOG_LEVEL_ERROR, strformat(F("SI70xx : Not available at address: %x"), i2caddr));
     }
     return false;
   }
@@ -26,9 +24,7 @@ bool P014_data_struct::startInit(uint8_t i2caddr)
   //reset the device
   if (!softReset(i2caddr)){
     if (loglevelActiveFor(LOG_LEVEL_ERROR)){
-      String log = F("SI70xx : Not able to reset: ");
-      log += String(i2caddr, HEX);
-      addLog(LOG_LEVEL_ERROR, log);
+      addLogMove(LOG_LEVEL_ERROR, strformat(F("SI70xx : Not able to reset: %x"), i2caddr));
     }
     return false;
   }
@@ -44,20 +40,14 @@ bool P014_data_struct::finalizeInit(uint8_t i2caddr, uint8_t resolution)
   int8_t ret = readSerialNumber(i2caddr); //this will also set the device ID
   if (ret){
       if (loglevelActiveFor(LOG_LEVEL_ERROR)){
-          String log = F("SI70xx : Not able to read SN: addr=0x");
-          log += String(i2caddr, HEX);
-          log += F(" err=");
-          log += String(ret, DEC);
-          addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, strformat(F("SI70xx : Not able to read SN: addr=0x%x err=%d"), i2caddr, ret));
       }
     //return false;
   }
 
   //at this point we know the chip_id
   if (loglevelActiveFor(LOG_LEVEL_INFO)){
-    String log = F("P014: chip_id=");
-    log += String(chip_id, DEC);
-    addLog(LOG_LEVEL_INFO, log);
+    addLogMove(LOG_LEVEL_INFO, strformat(F("P014: chip_id=%d"), chip_id));
   }
   if (chip_id == CHIP_ID_SI7013){
     if (!I2C_write8_reg(i2caddr,SI7013_WRITE_REG2, SI7013_REG2_DEFAULT )){
@@ -106,9 +96,7 @@ bool P014_data_struct::update(uint8_t i2caddr, uint8_t resolution, uint8_t filte
 
         if (I2C_wakeup(i2caddr)!=0){
           if (loglevelActiveFor(LOG_LEVEL_ERROR)){
-            String log = F("SI70xx : Not available at address: ");
-            log += String(i2caddr, HEX);
-            addLog(LOG_LEVEL_ERROR, log);
+            addLogMove(LOG_LEVEL_ERROR, strformat(F("SI70xx : Not available at address: %x"), i2caddr));
           }
           errCount++;
           return false;
@@ -180,12 +168,22 @@ bool P014_data_struct::update(uint8_t i2caddr, uint8_t resolution, uint8_t filte
           return true;
         }
         
-        if (!readTemperature(i2caddr,resolution)){
+        last_measurement_time = millis();
+  
+        if (chip_id == CHIP_ID_HTU21D){
+          if (!I2C_write8(i2caddr,SI70xx_CMD_MEASURE_TEMP)) { //HTU21D can't read temperature from humidity measurement
+            addLog(LOG_LEVEL_ERROR,F("SI70xx: startConv Failed!"));
+            return false;
+          }
+          state = P014_state::Wait_for_temperature_samples;
+          return false;
+        }
+
+        if (!readTemperatureFromHumidity(i2caddr,resolution)){
           state = P014_state::Ready; //we go back to request the reading again
           return true;
         }
 
-        last_measurement_time = millis();
         if (chip_id == CHIP_ID_SI7013){
           if(!enablePowerForADC(i2caddr)){
             state = P014_state::Ready; //we go back to request the reading again
@@ -198,7 +196,20 @@ bool P014_data_struct::update(uint8_t i2caddr, uint8_t resolution, uint8_t filte
         return true;
     //break;
 
-    case P014_state ::RequestADC:
+    case P014_state::Wait_for_temperature_samples:
+        if (!timeOutReached(last_measurement_time + SI70xx_MEASUREMENT_DELAY)) {
+          return false;
+        }
+
+        if (!readTemperature(i2caddr,resolution)){
+          state = P014_state::Ready; //we go back to request the reading again
+          return true;
+        }
+
+        state = P014_state::New_Values_Available;
+        return true;
+
+    case P014_state::RequestADC:
         //make sure we wait for the power to stabilize
         if (!timeOutReached(last_measurement_time + SI70xx_MEASUREMENT_DELAY)) {
           return false;
@@ -303,9 +314,7 @@ bool P014_data_struct::setResolution(uint8_t i2caddr, uint8_t resolution)
 
   if (!ok) {
       if (loglevelActiveFor(LOG_LEVEL_ERROR)){
-        String log = F("SI70xx : Unable to set resolution: ");
-        log += String(i2caddr, HEX);
-        addLog(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, strformat(F("SI70xx : Unable to set resolution: %x"), i2caddr));
       }
   }
 
@@ -335,9 +344,7 @@ int8_t P014_data_struct::readRevision(uint8_t i2caddr) {
       Wire.read(); //ignore CRC
 
       if (loglevelActiveFor(LOG_LEVEL_INFO)){
-        String log = F("SI7013 : revision=");
-        log += String(rev,HEX);
-        addLog(LOG_LEVEL_INFO,log);
+        addLogMove(LOG_LEVEL_INFO, strformat(F("SI7013 : revision=%x"), rev));
       }
       
       return 0;
@@ -394,11 +401,7 @@ int8_t P014_data_struct::readSerialNumber(uint8_t i2caddr) {
   Wire.read(); //ignore CRC
 
   if (loglevelActiveFor(LOG_LEVEL_INFO)){
-    String log = F("SI7013 : sn=");
-    log += String(sernum_a,HEX);
-    log += F("-");
-    log += String(sernum_b,HEX);
-    addLog(LOG_LEVEL_INFO,log);
+    addLogMove(LOG_LEVEL_INFO, strformat(F("SI7013 : sn=%x-%x"), sernum_a, sernum_b));
   }
   return 0; //ok
 }
@@ -504,7 +507,7 @@ bool P014_data_struct::readHumidity(uint8_t i2caddr, uint8_t resolution)
 
     // Comes back in three bytes, data(MSB) / data(LSB) / Checksum
     raw  = ((uint16_t) Wire.read()) << 8;
-    raw |= Wire.read();
+    raw |= Wire.read(); 
     uint8_t checksum = Wire.read();
 
 
@@ -516,7 +519,7 @@ bool P014_data_struct::readHumidity(uint8_t i2caddr, uint8_t resolution)
 
     // Convert raw value to Humidity percent
     // pm-cz: it is possible to enable decimal places for humidity as well by multiplying the value in formula by 100
-    uint16_t data = ((1250 * (long)raw) >> 16) - 60;
+    int data = ((1250 * (long)raw) >> 16) - 60;
 
     // Datasheet says doing this check
     if (data>1000) data = 1000;
@@ -533,12 +536,42 @@ bool P014_data_struct::readHumidity(uint8_t i2caddr, uint8_t resolution)
   return true;
 }
 
+bool P014_data_struct::readTemperature(uint8_t i2caddr, uint8_t resolution)
+{
+  uint16_t raw;
+  uint8_t bytes = Wire.requestFrom(i2caddr, 3u); //asking to read 3 bytes  
+  if ( bytes < 3 ) {
+    return false;
+  }
 
-bool P014_data_struct::readTemperature(uint8_t i2caddr, uint8_t resolution){
+  // Comes back in three bytes, data(MSB) / data(LSB) / Checksum
+  raw  = ((uint16_t) Wire.read()) << 8;
+  raw |= Wire.read();
+  
+  uint8_t checksum = Wire.read();
+
+  // Check CRC of data received
+  if(checkCRC(raw, checksum) != 0) {
+    addLog(LOG_LEVEL_ERROR,F("SI70xx : checksum error!"));
+    return false;
+  }
+
+  temperature =  convertRawTemperature(raw & 0xFFFC,resolution);
+  return true;
+}
+
+bool P014_data_struct::readTemperatureFromHumidity(uint8_t i2caddr, uint8_t resolution){
   // Temperature
   //Request a reading
   uint16_t   raw = I2C_read16_reg(i2caddr,SI70xx_CMD_READ_TEMP_FROM_HUM);
 
+  // save value
+  temperature =  convertRawTemperature(raw,resolution);
+  
+  return true;
+}
+
+int16_t P014_data_struct::convertRawTemperature(uint16_t raw, uint8_t resolution){
   // Convert raw value to Temperature (*100)
   // for 23.45C value will be 2345
   int16_t data =  ((17572 * (long)raw) >> 16) - 4685;
@@ -553,11 +586,7 @@ bool P014_data_struct::readTemperature(uint8_t i2caddr, uint8_t resolution){
     data *= 10;
   }
 
-  // save value
-  temperature =  data;
-  
-  return true;
+  return data;
 }
-
 
 #endif // ifdef USES_P014

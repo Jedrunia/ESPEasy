@@ -1,6 +1,7 @@
 #include "../PluginStructs/P129_data_struct.h"
 
 #ifdef USES_P129
+# include <GPIO_Direct_Access.h>
 
 // **************************************************************************/
 // Constructor
@@ -12,10 +13,6 @@ P129_data_struct::P129_data_struct(int8_t  dataPin,
                                    uint8_t chipCount)
   : _dataPin(dataPin), _clockPin(clockPin), _enablePin(enablePin), _loadPin(loadPin), _chipCount(chipCount) {}
 
-// **************************************************************************/
-// Destructor
-// **************************************************************************/
-P129_data_struct::~P129_data_struct() {}
 
 bool P129_data_struct::plugin_init(struct EventStruct *event) {
   if (isInitialized()) {
@@ -28,9 +25,9 @@ bool P129_data_struct::plugin_init(struct EventStruct *event) {
     pinMode(_loadPin,  OUTPUT);
     pinMode(_clockPin, OUTPUT);
     pinMode(_dataPin,  INPUT);
-    digitalWrite(_loadPin, HIGH);
+    DIRECT_pinWrite(_loadPin, HIGH);
 
-    if (validGpio(_enablePin)) { digitalWrite(_enablePin, HIGH); }
+    if (validGpio(_enablePin)) { DIRECT_pinWrite(_enablePin, HIGH); }
 
     return true;
   }
@@ -76,90 +73,121 @@ bool P129_data_struct::plugin_read(struct EventStruct *event) {
   return true;
 }
 
+const char p129_subcommands[] PROGMEM = "pinevent|chipevent|setchipcount|samplefrequency|eventperpin";
+enum class p129_subcommands_e {
+  pinevent,
+  chipevent,
+  setchipcount,
+  samplefrequency,
+  eventperpin
+};
+
 bool P129_data_struct::plugin_write(struct EventStruct *event,
                                     const String      & string) {
   bool success = false;
 
   const String command = parseString(string, 1);
 
-  if (command.equals(F("shiftin"))) {
+  if (equals(command, F("shiftin"))) {
     const String subcommand = parseString(string, 2);
+    int  command_i = GetCommandCode(subcommand.c_str(), p129_subcommands);
 
-    if (subcommand.equals(F("pinevent"))) { // ShiftIn,pinevent,<pin>,<0|1>
-      const uint8_t pin   = event->Par2 - 1;
-      const uint8_t value = event->Par3;
+    if (command_i == -1) {
+      // No matching subcommand found
+      return false;
+    }
 
-      if (validChannel(pin + 1) && ((value == 0) || (value == 1))) {
-        const uint8_t ulong = pin / 32;
-        const uint8_t bit   = pin % 32;
-        uint32_t lSettings  = PCONFIG_ULONG(ulong);
+    switch (static_cast<p129_subcommands_e>(command_i)) {
+      case p129_subcommands_e::pinevent:
+      { // ShiftIn,pinevent,<pin>,<0|1>
+        const uint8_t pin   = event->Par2 - 1;
+        const uint8_t value = event->Par3;
 
-        bitWrite(lSettings, bit, value);
-        PCONFIG_ULONG(ulong) = lSettings;
-        success              = true;
+        if (validChannel(pin + 1) && ((value == 0) || (value == 1))) {
+          const uint8_t ulong = pin / 32;
+          const uint8_t bit   = pin % 32;
+          uint32_t lSettings  = PCONFIG_ULONG(ulong);
+
+          bitWrite(lSettings, bit, value);
+          PCONFIG_ULONG(ulong) = lSettings;
+          success              = true;
         # ifdef P129_DEBUG_LOG
 
-        if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
-          String log = command;
-          log += F(", pin: ");
-          log += event->Par2;
-          log += F(", value: ");
-          log += value;
-          log += F(", config: ");
-          log += ulong;
-          log += F(", bit: ");
-          log += bit;
-          addLogMove(LOG_LEVEL_DEBUG, log);
-        }
+          if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+            String log = command;
+            log += F(", pin: ");
+            log += event->Par2;
+            log += F(", value: ");
+            log += value;
+            log += F(", config: ");
+            log += ulong;
+            log += F(", bit: ");
+            log += bit;
+            addLogMove(LOG_LEVEL_DEBUG, log);
+          }
         # endif // ifdef P129_DEBUG_LOG
+        }
+        break;
       }
-    } else if (subcommand.equals(F("chipevent"))) { // ShiftIn,chipevent,<chip>,<0|1>
-      const uint8_t chip  = event->Par2 - 1;
-      const uint8_t value = event->Par3;
+      case p129_subcommands_e::chipevent:
+      { // ShiftIn,chipevent,<chip>,<0|1>
+        const int8_t  chip  = event->Par2 - 1;
+        const uint8_t value = event->Par3;
 
-      if ((chip >= 0) && (chip < P129_CONFIG_CHIP_COUNT) && ((value == 0) || (value == 1))) {
-        const uint8_t ulong = chip / 4;
-        const uint8_t bit   = (chip % 4) * 8;
-        uint32_t lSettings  = PCONFIG_ULONG(ulong);
+        if ((chip >= 0) && (chip < P129_CONFIG_CHIP_COUNT) && ((value == 0) || (value == 1))) {
+          const uint8_t ulong = chip / 4;
+          const uint8_t bit   = (chip % 4) * 8;
+          uint32_t lSettings  = PCONFIG_ULONG(ulong);
 
-        set8BitToUL(lSettings, bit, value == 1 ? 0xFF : 0x00);
-        PCONFIG_ULONG(ulong) = lSettings;
-        success              = true;
+          set8BitToUL(lSettings, bit, value == 1 ? 0xFF : 0x00);
+          PCONFIG_ULONG(ulong) = lSettings;
+          success              = true;
         # ifdef P129_DEBUG_LOG
 
-        if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
-          String log = command;
-          log += F(", chip: ");
-          log += event->Par2;
-          log += F(", value: ");
-          log += value;
-          log += F(", config: ");
-          log += ulong;
-          log += F(", bit: ");
-          log += bit;
-          addLogMove(LOG_LEVEL_DEBUG, log);
-        }
+          if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+            String log = command;
+            log += F(", chip: ");
+            log += event->Par2;
+            log += F(", value: ");
+            log += value;
+            log += F(", config: ");
+            log += ulong;
+            log += F(", bit: ");
+            log += bit;
+            addLogMove(LOG_LEVEL_DEBUG, log);
+          }
         # endif // ifdef P129_DEBUG_LOG
+        }
+        break;
       }
-    } else if (subcommand.equals(F("setchipcount"))) { // ShiftIn,setchipcount,<count>
-      if ((event->Par2 >= 1) && (event->Par2 <= P129_MAX_CHIP_COUNT)) {
-        P129_CONFIG_CHIP_COUNT = event->Par2;
-        _chipCount             = event->Par2;
-        success                = true;
+      case p129_subcommands_e::setchipcount:
+      { // ShiftIn,setchipcount,<count>
+        if ((event->Par2 >= 1) && (event->Par2 <= P129_MAX_CHIP_COUNT)) {
+          P129_CONFIG_CHIP_COUNT = event->Par2;
+          _chipCount             = event->Par2;
+          success                = true;
+        }
+        break;
       }
-    } else if (subcommand.equals(F("samplefrequency"))) { // ShiftIn,samplefrequency,<0|1>
-      if ((event->Par2 == 0) || (event->Par2 == 1)) {
-        uint32_t lSettings = P129_CONFIG_FLAGS;
-        bitWrite(lSettings, P129_FLAGS_READ_FREQUENCY, event->Par2 == 1);
-        P129_CONFIG_FLAGS = lSettings;
-        success           = true;
+      case p129_subcommands_e::samplefrequency:
+      { // ShiftIn,samplefrequency,<0|1>
+        if ((event->Par2 == 0) || (event->Par2 == 1)) {
+          uint32_t lSettings = P129_CONFIG_FLAGS;
+          bitWrite(lSettings, P129_FLAGS_READ_FREQUENCY, event->Par2 == 1);
+          P129_CONFIG_FLAGS = lSettings;
+          success           = true;
+        }
+        break;
       }
-    } else if (subcommand.equals(F("eventperpin"))) { // ShiftIn,eventperpin,<0|1>
-      if ((event->Par2 == 0) || (event->Par2 == 1)) {
-        uint32_t lSettings = P129_CONFIG_FLAGS;
-        bitWrite(lSettings, P129_FLAGS_SEPARATE_EVENTS, event->Par2 == 1);
-        P129_CONFIG_FLAGS = lSettings;
-        success           = true;
+      case p129_subcommands_e::eventperpin:
+      { // ShiftIn,eventperpin,<0|1>
+        if ((event->Par2 == 0) || (event->Par2 == 1)) {
+          uint32_t lSettings = P129_CONFIG_FLAGS;
+          bitWrite(lSettings, P129_FLAGS_SEPARATE_EVENTS, event->Par2 == 1);
+          P129_CONFIG_FLAGS = lSettings;
+          success           = true;
+        }
+        break;
       }
     }
     # ifdef P129_DEBUG_LOG
@@ -174,19 +202,19 @@ bool P129_data_struct::plugin_write(struct EventStruct *event,
 
 bool P129_data_struct::plugin_readData(struct EventStruct *event) {
   if (isInitialized()) {
-    digitalWrite(_loadPin, LOW);
+    DIRECT_pinWrite(_loadPin, LOW);
     delayMicroseconds(5);
-    digitalWrite(_loadPin, HIGH);
+    DIRECT_pinWrite(_loadPin, HIGH);
     delayMicroseconds(5);
 
-    if (validGpio(_enablePin)) { digitalWrite(_enablePin, LOW); }
+    if (validGpio(_enablePin)) { DIRECT_pinWrite(_enablePin, LOW); }
 
     for (uint8_t i = 0; i < P129_CONFIG_CHIP_COUNT; i++) {
       prevBuffer[i] = readBuffer[i];
       readBuffer[i] = shiftIn(static_cast<uint8_t>(_dataPin), static_cast<uint8_t>(_clockPin), MSBFIRST);
     }
 
-    if (validGpio(_enablePin)) { digitalWrite(_enablePin, HIGH); }
+    if (validGpio(_enablePin)) { DIRECT_pinWrite(_enablePin, HIGH); }
     delay(0);
 
     checkDiff(event);

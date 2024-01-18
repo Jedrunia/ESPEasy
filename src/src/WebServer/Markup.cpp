@@ -8,7 +8,9 @@
 #include "../Globals/Settings.h"
 
 #include "../Helpers/Convert.h"
-#include "../Helpers/Hardware.h"
+#include "../Helpers/Hardware_GPIO.h"
+#include "../Helpers/StringConverter_Numerical.h"
+#include "../Helpers/StringConverter.h"
 #include "../Helpers/StringGenerator_GPIO.h"
 
 #include "../../ESPEasy_common.h"
@@ -147,47 +149,31 @@ void addSelector(const String  & id,
 
 void addSelector_options(int optionCount, const __FlashStringHelper *options[], const int indices[], const String attr[], int selectedIndex)
 {
-  int index;
-
-  for (uint8_t x = 0; x < optionCount; x++)
+  for (uint8_t x = 0; x < optionCount; ++x)
   {
-    if (indices) {
-      index = indices[x];
-    }
-    else {
-      index = x;
-    }
-    String attr_str;
-
-    if (attr)
-    {
-      attr_str = attr[x];
-    }
-    addSelector_Item(options[x], index, selectedIndex == index, false, attr_str);
-    if (x % 10 == 0) delay(0);
+    const int index = indices ? indices[x] : x;
+    addSelector_Item(
+      options[x], 
+      index, 
+      selectedIndex == index, 
+      false, 
+      attr ? attr[x] : EMPTY_STRING);
+    if ((x & 0x07) == 0) delay(0);
   }
 }
 
 void addSelector_options(int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex)
 {
-  int index;
-
-  for (uint8_t x = 0; x < optionCount; x++)
+  for (uint8_t x = 0; x < optionCount; ++x)
   {
-    if (indices) {
-      index = indices[x];
-    }
-    else {
-      index = x;
-    }
-    String attr_str;
-
-    if (attr)
-    {
-      attr_str = attr[x];
-    }
-    addSelector_Item(options[x], index, selectedIndex == index, false, attr_str);
-    if (x % 10 == 0) delay(0);
+    const int index = indices ? indices[x] : x;
+    addSelector_Item(
+      options[x], 
+      index, 
+      selectedIndex == index, 
+      false, 
+      attr ? attr[x] : EMPTY_STRING);
+    if ((x & 0x07) == 0) delay(0);
   }
 }
 
@@ -274,9 +260,13 @@ void addPinSelector_Item(PinSelectPurpose purpose, const String& gpio_label, int
     if (getGpioInfo(gpio, pinnr, input, output, warning)) {
       bool includeI2C = true;
       bool includeSPI = true;
+      bool includeSerial = true;
       #if FEATURE_ETHERNET
       bool includeEthernet = true;
       #endif // if FEATURE_ETHERNET
+      #if FEATURE_SD
+      bool includeSDCard = true;
+      #endif // if FEATURE_SD
 
       switch (purpose) {
         case PinSelectPurpose::SPI:
@@ -306,6 +296,7 @@ void addPinSelector_Item(PinSelectPurpose purpose, const String& gpio_label, int
           break;
 
         case PinSelectPurpose::Generic_output:
+        case PinSelectPurpose::DAC:
 
           if (!output) {
             return;
@@ -323,13 +314,35 @@ void addPinSelector_Item(PinSelectPurpose purpose, const String& gpio_label, int
             return;
           }
           break;
+          
+        case PinSelectPurpose::Serial_input:
+          includeSerial = false;
+          if (!input) {
+            return;
+          }
+          break;
+
+        case PinSelectPurpose::Serial_output:
+          includeSerial = false;
+          if (!output) {
+            return;
+          }
+          break;
+        #if FEATURE_SD
+        case PinSelectPurpose::SD_Card:
+          includeSDCard = false;
+          if (!output) {
+            return;
+          }
+          break;
+        #endif
       }
 
       if (includeI2C && Settings.isI2C_pin(gpio)) {
         disabled = true;
       }
 
-      if (Settings.UseSerial && ((gpio == 1) || (gpio == 3))) {
+      if (includeSerial && isSerialConsolePin(gpio)) {
         disabled = true;
       }
 
@@ -343,6 +356,12 @@ void addPinSelector_Item(PinSelectPurpose purpose, const String& gpio_label, int
         disabled = true;
       }
   #endif // if FEATURE_ETHERNET
+
+      #if FEATURE_SD
+      if (includeSDCard && (Settings.Pin_sd_cs == gpio)) {
+        disabled = true;
+      }
+      #endif
     }
   }
 
@@ -443,19 +462,14 @@ void addRowLabel_tr_id(const String& label, const String& id)
   if (id.isEmpty()) {
     addRowLabel(label);
   } else {
-    String tr_id = F("tr_");
-
-    tr_id += id;
-    addRowLabel(label, tr_id);
+    addRowLabel(label, concat(F("tr_"), id));
   }
 }
 
 void addRowLabel(const __FlashStringHelper *label)
 {
   html_TR_TD();
-  addHtml(label);
-  addHtml(':');
-  addHtml(F("</td>"));
+  addHtml(concat(label, F(":</td>")));
   html_TD();
 }
 
@@ -505,6 +519,21 @@ void addRowLabelValue(LabelType::Enum label) {
   addHtml(getValue(label));
 }
 
+void addRowLabelValues(const LabelType::Enum labels[]) {
+  size_t i = 0;
+  LabelType::Enum cur  = static_cast<const LabelType::Enum>(pgm_read_byte(labels + i));
+
+  while (true) {
+    const LabelType::Enum next = static_cast<const LabelType::Enum>(pgm_read_byte(labels + i + 1));
+    addRowLabelValue(cur);
+    if (next == LabelType::MAX_LABEL) {
+      return;
+    }
+    ++i;
+    cur = next;
+  }
+}
+
 void addRowLabelValue_copy(LabelType::Enum label) {
   addRowLabel_copy(getLabel(label));
   addHtml(getValue(label));
@@ -515,15 +544,13 @@ void addRowLabelValue_copy(LabelType::Enum label) {
 // ********************************************************************************
 void addTableSeparator(const __FlashStringHelper *label, int colspan, int h_size)
 {
-  addHtml(F("<TR><TD colspan="));
-  addHtmlInt(colspan);
-  addHtml(F("><H"));
-  addHtmlInt(h_size);
-  addHtml('>');
+  addHtml(strformat(
+    F("<TR><TD colspan=%d><H%d>"),
+    colspan, h_size));
   addHtml(label);
-  addHtml(F("</H"));
-  addHtmlInt(h_size);
-  addHtml(F("></TD></TR>"));
+  addHtml(strformat(
+    F("</H%d></TD></TR>"),
+    h_size));
 }
 
 void addTableSeparator(const __FlashStringHelper *label, int colspan, int h_size, const __FlashStringHelper *helpButton)
@@ -532,29 +559,17 @@ void addTableSeparator(const __FlashStringHelper *label, int colspan, int h_size
 }
 
 void addTableSeparator(const String& label, int colspan, int h_size, const String& helpButton) {
-  {
-    String html;
-    html.reserve(32 + label.length());
-    html += F("<TR><TD colspan=");
-    html += colspan;
-    html += F("><H");
-    html += h_size;
-    html += '>';
-    html += label;
-    addHtml(html);
-  }
+  addHtml(strformat(
+    F("<TR><TD colspan=%d><H%d>"),
+    colspan, h_size));
+  addHtml(label);
 
-  if (helpButton.length() > 0) {
+  if (!helpButton.isEmpty()) {
     addHelpButton(helpButton);
   }
-  {
-    String html;
-    html.reserve(16);
-    html += F("</H");
-    html += h_size;
-    html += F("></TD></TR>");
-    addHtml(html);
-  }
+  addHtml(strformat(
+    F("</H%d></TD></TR>"),
+    h_size));
 }
 
 void addFormHeader(const __FlashStringHelper *header) {
@@ -642,15 +657,16 @@ void addCheckBox(const String& id, bool    checked, bool disabled
 // ********************************************************************************
 // Add a numeric box
 // ********************************************************************************
-void addNumericBox(const __FlashStringHelper *id, int value, int min, int max)
+void addNumericBox(const __FlashStringHelper *id, int value, int min, int max, bool disabled)
 {
-  addNumericBox(String(id), value, min, max);
+  addNumericBox(String(id), value, min, max, disabled);
 }
 
 void addNumericBox(const String& id, int value, int min, int max
                    #if FEATURE_TOOLTIPS
                    , const __FlashStringHelper * classname, const String& tooltip
                    #endif // if FEATURE_TOOLTIPS
+                   , bool disabled
                    )
 {
   addHtml(F("<input "));
@@ -661,6 +677,7 @@ void addNumericBox(const String& id, int value, int min, int max
   #endif  // if FEATURE_TOOLTIPS
   addHtmlAttribute(F("type"),  F("number"));
   addHtmlAttribute(F("name"),  id);
+  addHtmlAttribute(F("id"),    id);
 
   #if FEATURE_TOOLTIPS
 
@@ -668,6 +685,10 @@ void addNumericBox(const String& id, int value, int min, int max
     addHtmlAttribute(F("title"), tooltip);
   }
   #endif // if FEATURE_TOOLTIPS
+
+  if (disabled) {
+    addDisabled();
+  }
 
   if (value < min) {
     value = min;
@@ -691,9 +712,9 @@ void addNumericBox(const String& id, int value, int min, int max
 }
 
 #if FEATURE_TOOLTIPS
-void addNumericBox(const String& id, int value, int min, int max)
+void addNumericBox(const String& id, int value, int min, int max, bool disabled)
 {
-  addNumericBox(id, value, min, max, F("widenumber"));
+  addNumericBox(id, value, min, max, F("widenumber"), EMPTY_STRING, disabled);
 }
 
 #endif // if FEATURE_TOOLTIPS
@@ -704,44 +725,36 @@ void addFloatNumberBox(const String& id, float value, float min, float max, unsi
                        #endif // if FEATURE_TOOLTIPS
                        )
 {
-  String html;
-
-  html.reserve(64 + id.length());
-
-  html += F("<input type='number' name='");
-  html += id;
-  html += '\'';
-  html += F(" min=");
-  html += toString(min, nrDecimals);
-  html += F(" max=");
-  html += toString(max, nrDecimals);
-  html += F(" step=");
+  addHtml(strformat(
+      F("<input type='number' name='%s' min="),
+      id.c_str()));
+  addHtmlFloat(min, nrDecimals);
+  addHtml(F(" max="));
+  addHtmlFloat(max, nrDecimals);
+  addHtml(F(" step="));
 
   if (stepsize <= 0.0f) {
-    html += F("0.");
+    addHtml('0', '.');
 
     for (uint8_t i = 1; i < nrDecimals; ++i) {
-      html += '0';
+      addHtml('0');
     }
-    html += '1';
+    addHtml('1');
   } else {
-    html += toString(stepsize, nrDecimals);
+    addHtmlFloat(stepsize, nrDecimals);
   }
 
-  html += F(" style='width:7em;' value=");
-  html += toString(value, nrDecimals);
+  addHtml(F(" style='width:7em;' value="));
+  addHtmlFloat(value, nrDecimals);
 
   #if FEATURE_TOOLTIPS
 
-  if (tooltip.length() > 0) {
-    html += F("title='");
-    html += tooltip;
-    html += F("' ");
+  if (!tooltip.isEmpty()) {
+    addHtml(strformat(
+      F("title='%s' "), tooltip.c_str()));
   }
   #endif // if FEATURE_TOOLTIPS
-  html += '>';
-
-  addHtml(html);
+  addHtml('>');
 }
 
 // ********************************************************************************
@@ -765,14 +778,20 @@ void addTextBox(const String  & id,
                 #if FEATURE_TOOLTIPS
                 , const String& tooltip
                 #endif // if FEATURE_TOOLTIPS
+                ,
+                const String&   datalist
                 )
 {
   addHtml(F("<input "));
   addHtmlAttribute(F("class"),     classname);
   addHtmlAttribute(F("type"),      F("search"));
   addHtmlAttribute(F("name"),      id);
+  addHtmlAttribute(F("id"),        id);
   if (maxlength > 0) {
     addHtmlAttribute(F("maxlength"), maxlength);
+  }
+  if (!datalist.isEmpty()) {
+    addHtmlAttribute(F("list"),    datalist);
   }
   addHtmlAttribute(F("value"),     value);
 
@@ -818,6 +837,7 @@ void addTextArea(const String  & id,
   addHtmlAttribute(F("class"),     F("wide"));
   addHtmlAttribute(F("type"),      F("text"));
   addHtmlAttribute(F("name"),      id);
+  addHtmlAttribute(F("id"),        id);
   if (maxlength > 0) {
     addHtmlAttribute(F("maxlength"), maxlength);
   }
@@ -879,29 +899,32 @@ void addHelpButton(const String& url, bool isRTD)
   #endif // ifndef WEBPAGE_TEMPLATE_HIDE_HELP_BUTTON
 }
 
-void addRTDPluginButton(pluginID_t taskDeviceNumber) {
-  String url;
+void addRTDPluginButton(pluginID_t pluginID) {
+  addRTDHelpButton(
+    strformat(
+      F("Plugin/%s.html"),
+      get_formatted_Plugin_number(pluginID).c_str()));
 
-  url.reserve(16);
-  url = F("Plugin/P");
+  constexpr pluginID_t PLUGIN_ID_P076_HLW8012(76);
+  constexpr pluginID_t PLUGIN_ID_P077_CSE7766(77);
 
-  if (taskDeviceNumber < 100) { url += '0'; }
-
-  if (taskDeviceNumber < 10) { url += '0'; }
-  url += String(taskDeviceNumber);
-  url += F(".html");
-  addRTDHelpButton(url);
-
-  switch (taskDeviceNumber) {
-    case 76:
-    case 77:
-      addHtmlLink(
-        F("button help"),
-        makeDocLink(F("Reference/Safety.html"), true),
-        F("&#9889;")); // High voltage sign
-      break;
+  if ((pluginID == PLUGIN_ID_P076_HLW8012) || 
+      (pluginID == PLUGIN_ID_P077_CSE7766)) {
+    addHtmlLink(
+      F("button help"),
+      makeDocLink(F("Reference/Safety.html"), true),
+      F("&#9889;")); // High voltage sign
   }
 }
+
+# ifndef LIMIT_BUILD_SIZE
+void addRTDControllerButton(cpluginID_t cpluginID) {
+  addRTDHelpButton(
+    strformat(
+      F("Controller/%s.html"),
+      get_formatted_Controller_number(cpluginID).c_str()));
+}
+# endif // ifndef LIMIT_BUILD_SIZE
 
 String makeDocLink(const String& url, bool isRTD) {
   String result;
@@ -938,11 +961,11 @@ void addPinSelect(PinSelectPurpose purpose, const String& id,  int choice)
     const bool UsableGPIO = getGpioInfo(gpio, pinnr, input, output, warning);
 
     if (UsableGPIO || (i == 0)) {
-      String gpio_label = createGPIO_label(gpio, pinnr, input, output, warning);
-      gpio_label += getConflictingUse_wrapped(gpio, purpose);
       addPinSelector_Item(
         purpose,
-        gpio_label,
+        concat(
+          createGPIO_label(gpio, pinnr, input, output, warning),
+          getConflictingUse_wrapped(gpio, purpose)),
         gpio,
         choice == gpio);
 
@@ -962,7 +985,10 @@ void addADC_PinSelect(AdcPinSelectPurpose purpose, const String& id,  int choice
   int i    = 0;
   int gpio = -1;
 
-  if ((purpose == AdcPinSelectPurpose::ADC_Touch_HallEffect) ||
+  if (
+#if HAS_HALL_EFFECT_SENSOR
+    (purpose == AdcPinSelectPurpose::ADC_Touch_HallEffect) ||
+#endif
       (purpose == AdcPinSelectPurpose::ADC_Touch_Optional)) {
     addPinSelector_Item(
       PinSelectPurpose::Generic,
@@ -1005,6 +1031,46 @@ void addADC_PinSelect(AdcPinSelectPurpose purpose, const String& id,  int choice
       }
     }
     ++i;
+  }
+  addSelector_Foot();
+}
+
+void addDAC_PinSelect(const String& id,  int choice)
+{
+  addSelector_Head(id);
+
+  // At i == 0 && gpio == -1, add the "- None -" option first
+  int i    = 0;
+  int gpio = -1;
+
+  while (gpio <= MAX_GPIO) {
+    int  pinnr   = -1;
+    bool input   = false;
+    bool output  = false;
+    bool warning = false;
+    int  dac     = 0;
+
+    // Make sure getGpioInfo is called (compiler may optimize it away if (i == 0))
+    const bool UsableGPIO = getDAC_gpio_info(gpio, dac); // getGpioInfo(gpio, pinnr, input, output, warning);
+
+    if (UsableGPIO || (i == 0)) {
+      if (getGpioInfo(gpio, pinnr, input, output, warning) || (i == 0)) {
+        String gpio_label = formatGpioName_DAC(gpio);
+
+        if (dac != 0) {
+          gpio_label += F(" / ");
+          gpio_label += createGPIO_label(gpio, pinnr, input, output, warning);
+          gpio_label += getConflictingUse_wrapped(gpio, PinSelectPurpose::DAC);
+        }
+        addPinSelector_Item(
+          PinSelectPurpose::DAC,
+          gpio_label,
+          gpio,
+          choice == gpio);
+      }
+      ++i;
+    }
+    ++gpio;
   }
   addSelector_Foot();
 }

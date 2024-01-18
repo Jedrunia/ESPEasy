@@ -14,8 +14,8 @@
 # define PCA9685_NUMS_ADDRESS       (PCA9685_MAX_ADDRESS - PCA9685_ADDRESS)
 # define PCA9685_MAX_PINS           15
 # define PCA9685_MAX_PWM            4095
-# define PCA9685_MIN_FREQUENCY      23.0   // Min possible PWM cycle frequency
-# define PCA9685_MAX_FREQUENCY      1500.0 // Max possible PWM cycle frequency
+# define PCA9685_MIN_FREQUENCY      23   // Min possible PWM cycle frequency
+# define PCA9685_MAX_FREQUENCY      1500 // Max possible PWM cycle frequency
 # define PCA9685_ALLLED_REG         (uint8_t)0xFA
 
 // FIXME TD-er: This still uses a bitmask to keep track of what address was initialized.
@@ -23,6 +23,9 @@
 // Administration per address is no longer needed as it may be behind a multiplexer,
 // so multiple instances using the same address is now allowed.
 struct P022_data_struct : public PluginTaskData_base {
+  P022_data_struct() = default;
+  virtual ~P022_data_struct() = default;
+
   bool p022_is_init(uint8_t address);
 
   bool p022_set_init(uint8_t address);
@@ -32,9 +35,6 @@ struct P022_data_struct : public PluginTaskData_base {
   void Plugin_022_writeRegister(int  i2cAddress,
                                 int  regAddress,
                                 uint8_t data);
-
-  uint8_t Plugin_022_readRegister(int i2cAddress,
-                                  int regAddress);
 
   void    Plugin_022_Off(int address,
                          int pin);
@@ -51,6 +51,11 @@ struct P022_data_struct : public PluginTaskData_base {
 
   void Plugin_022_initialize(int address);
 
+
+  static String P022_logPrefix(int address);
+  static String P022_logPrefix(int address, const __FlashStringHelper * poststr);
+
+  void initModeFreq(int address, uint8_t mode2, uint16_t freq);
 
   uint32_t initializeState_lo = 0;
   uint32_t initializeState_hi = 0;

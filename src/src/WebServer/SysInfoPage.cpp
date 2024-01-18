@@ -2,66 +2,66 @@
 
 #if defined(WEBSERVER_SYSINFO) || SHOW_SYSINFO_JSON
 
-#include "../WebServer/AccessControl.h"
-#include "../WebServer/ESPEasy_WebServer.h"
-#include "../WebServer/HTML_wrappers.h"
-#include "../WebServer/Markup.h"
-#include "../WebServer/Markup_Buttons.h"
+# include "../WebServer/AccessControl.h"
+# include "../WebServer/ESPEasy_WebServer.h"
+# include "../WebServer/HTML_wrappers.h"
+# include "../WebServer/Markup.h"
+# include "../WebServer/Markup_Buttons.h"
 
 
-#include "../../ESPEasy-Globals.h"
+# include "../../ESPEasy-Globals.h"
 
-#include "../Commands/Diagnostic.h"
+# include "../Commands/Diagnostic.h"
 
-#include "../CustomBuild/CompiletimeDefines.h"
+# include "../CustomBuild/CompiletimeDefines.h"
 
-#include "../DataStructs/RTCStruct.h"
+# include "../DataStructs/RTCStruct.h"
 
-#include "../ESPEasyCore/ESPEasyNetwork.h"
-#include "../ESPEasyCore/ESPEasyWifi.h"
+# include "../ESPEasyCore/ESPEasyEth.h"
+# include "../ESPEasyCore/ESPEasyNetwork.h"
+# include "../ESPEasyCore/ESPEasyWifi.h"
 
-#include "../Globals/CRCValues.h"
-#include "../Globals/ESPEasy_time.h"
-#include "../Globals/ESPEasyWiFiEvent.h"
-#include "../Globals/NetworkState.h"
-#include "../Globals/RTC.h"
-#include "../Globals/Settings.h"
+# include "../Globals/CRCValues.h"
+# include "../Globals/ESPEasy_time.h"
+# include "../Globals/ESPEasyWiFiEvent.h"
+# include "../Globals/NetworkState.h"
+# include "../Globals/RTC.h"
+# include "../Globals/Settings.h"
 
-#include "../Helpers/Convert.h"
-#include "../Helpers/ESPEasyStatistics.h"
-#include "../Helpers/ESPEasy_Storage.h"
-#include "../Helpers/Hardware.h"
-#include "../Helpers/Memory.h"
-#include "../Helpers/Misc.h"
-#include "../Helpers/OTA.h"
-#include "../Helpers/StringConverter.h"
-#include "../Helpers/StringGenerator_GPIO.h"
-#include "../Helpers/StringGenerator_System.h"
-#include "../Helpers/StringProvider.h"
+# include "../Helpers/Convert.h"
+# include "../Helpers/ESPEasyStatistics.h"
+# include "../Helpers/ESPEasy_Storage.h"
+# include "../Helpers/Hardware_device_info.h"
+# include "../Helpers/Memory.h"
+# include "../Helpers/Misc.h"
+# include "../Helpers/Networking.h"
+# include "../Helpers/OTA.h"
+# include "../Helpers/StringConverter.h"
+# include "../Helpers/StringGenerator_GPIO.h"
+# include "../Helpers/StringGenerator_System.h"
+# include "../Helpers/StringProvider.h"
 
-#include "../Static/WebStaticData.h"
+# include "../Static/WebStaticData.h"
 
-#if FEATURE_MQTT
-# include "../Globals/MQTT.h"
-# include "../Helpers/PeriodicalActions.h" // For finding enabled MQTT controller
-#endif
+# if FEATURE_MQTT
+#  include "../Globals/MQTT.h"
+#  include "../ESPEasyCore/Controller.h" // For finding enabled MQTT controller
+# endif // if FEATURE_MQTT
 
-#ifdef ESP32
-# include <esp_partition.h>
-#endif // ifdef ESP32
-
-
-
+# ifdef ESP32
+#  include <esp_partition.h>
+# endif // ifdef ESP32
 
 
-#if SHOW_SYSINFO_JSON
+# if SHOW_SYSINFO_JSON
+
 // ********************************************************************************
 // Web Interface sysinfo page
 // ********************************************************************************
 void handle_sysinfo_json() {
-  # ifndef BUILD_NO_RAM_TRACKER
+  #  ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("handle_sysinfo"));
-  # endif // ifndef BUILD_NO_RAM_TRACKER
+  #  endif // ifndef BUILD_NO_RAM_TRACKER
 
   if (!isLoggedIn()) { return; }
   TXBuffer.startJsonStream();
@@ -120,6 +120,11 @@ void handle_sysinfo_json() {
   json_number(F("rssi"),        String(WiFi.RSSI()));
   json_prop(F("dhcp"),          useStaticIP() ? getLabel(LabelType::IP_CONFIG_STATIC) : getLabel(LabelType::IP_CONFIG_DYNAMIC));
   json_prop(F("ip"),            getValue(LabelType::IP_ADDRESS));
+#if FEATURE_USE_IPV6
+  json_prop(F("ip6_local"),     getValue(LabelType::IP6_LOCAL));
+  json_prop(F("ip6_global"),     getValue(LabelType::IP6_GLOBAL));
+#endif
+
   json_prop(F("subnet"),        getValue(LabelType::IP_SUBNET));
   json_prop(F("gw"),            getValue(LabelType::GATEWAY));
   json_prop(F("dns1"),          getValue(LabelType::DNS_1));
@@ -146,6 +151,9 @@ void handle_sysinfo_json() {
   json_prop(F("ethspeed"),      getValue(LabelType::ETH_SPEED));
   json_prop(F("ethstate"),      getValue(LabelType::ETH_STATE));
   json_prop(F("ethspeedstate"), getValue(LabelType::ETH_SPEED_STATE));
+#if FEATURE_USE_IPV6
+  json_prop(F("ethipv6local"), getValue(LabelType::ETH_IP6_LOCAL));
+#endif
   json_close();
 # endif // if FEATURE_ETHERNET
 
@@ -161,6 +169,9 @@ void handle_sysinfo_json() {
   json_prop(F("filename"),       getValue(LabelType::BINARY_FILENAME));
   json_prop(F("build_platform"), getValue(LabelType::BUILD_PLATFORM));
   json_prop(F("git_head"),       getValue(LabelType::GIT_HEAD));
+  #ifdef CONFIGURATION_CODE
+  json_prop(F("configuration_code"), getValue(LabelType::CONFIGURATION_CODE_LBL));
+  #endif // ifdef CONFIGURATION_CODE
   json_close();
 
   json_open(false, F("esp"));
@@ -170,7 +181,7 @@ void handle_sysinfo_json() {
   json_number(F("xtal_freq"),    getValue(LabelType::ESP_CHIP_XTAL_FREQ));
   json_number(F("abp_freq"),     getValue(LabelType::ESP_CHIP_APB_FREQ));
 #endif
-  json_prop(F("board"),          getValue(LabelType::ESP_BOARD_NAME));
+  json_prop(F("board"),          getValue(LabelType::BOARD_NAME));
   json_close();
 
   json_open(false, F("storage"));
@@ -288,6 +299,11 @@ void handle_sysinfo_basicInfo() {
   if (node_time.systemTimePresent())
   {
     addRowLabelValue(LabelType::LOCAL_TIME);
+    #if FEATURE_EXT_RTC
+    if (Settings.ExtTimeSource() != ExtTimeSource_e::None) {
+      addRowLabelValue(LabelType::EXT_RTC_UTC_TIME);
+    }
+    #endif
     addRowLabelValue(LabelType::TIME_SOURCE);
     addRowLabelValue(LabelType::TIME_WANDER);
     addUnit(F("ppm"));
@@ -302,10 +318,10 @@ void handle_sysinfo_basicInfo() {
 
   if (wdcounter > 0)
   {
-    addHtml(String(getCPUload()));
-    addHtml(F("% (LC="));
-    addHtmlInt(getLoopCountPerSec());
-    addHtml(')');
+    addHtml(strformat(
+      F("%.2f%% (LC=%d)"),
+      getCPUload(),
+      getLoopCountPerSec()));
   }
   addRowLabelValue(LabelType::CPU_ECO_MODE);
 
@@ -313,9 +329,8 @@ void handle_sysinfo_basicInfo() {
   addRowLabel(F("Boot"));
   {
     addHtml(getLastBootCauseString());
-    addHtml(F(" ("));
-    addHtmlInt(static_cast<uint32_t>(RTC.bootCounter));
-    addHtml(')');
+    addHtml(strformat(
+      F(" (%d)"), static_cast<uint32_t>(RTC.bootCounter)));
   }
   addRowLabelValue(LabelType::RESET_REASON);
   addRowLabelValue(LabelType::LAST_TASK_BEFORE_REBOOT);
@@ -389,13 +404,22 @@ void handle_sysinfo_memory() {
 void handle_sysinfo_Ethernet() {
   if (active_network_medium == NetworkMedium_t::Ethernet) {
     addTableSeparator(F("Ethernet"), 2, 3);
-    addRowLabelValue(LabelType::ETH_STATE);
-    addRowLabelValue(LabelType::ETH_SPEED);
-    addRowLabelValue(LabelType::ETH_DUPLEX);
-    addRowLabelValue(LabelType::ETH_MAC);
-//    addRowLabelValue(LabelType::ETH_IP_ADDRESS_SUBNET);
-//    addRowLabelValue(LabelType::ETH_IP_GATEWAY);
-//    addRowLabelValue(LabelType::ETH_IP_DNS);
+
+    static const LabelType::Enum labels[] PROGMEM =
+    {
+      LabelType::ETH_STATE,
+      LabelType::ETH_SPEED,
+      LabelType::ETH_DUPLEX,
+      LabelType::ETH_MAC,
+//    LabelType::ETH_IP_ADDRESS_SUBNET,
+//    LabelType::ETH_IP_GATEWAY,
+//    LabelType::ETH_IP_DNS,
+
+      LabelType::MAX_LABEL
+    };
+
+    addRowLabelValues(labels);
+
   }
 }
 
@@ -404,18 +428,31 @@ void handle_sysinfo_Ethernet() {
 void handle_sysinfo_Network() {
   addTableSeparator(F("Network"), 2, 3);
 
-  # if FEATURE_ETHERNET || defined(USES_ESPEASY_NOW)
-  addRowLabelValue(LabelType::ETH_WIFI_MODE);
-  # endif 
+  {
+    static const LabelType::Enum labels[] PROGMEM =
+    {
+# if FEATURE_ETHERNET || defined(USES_ESPEASY_NOW)
+      LabelType::ETH_WIFI_MODE,
+# endif 
+      LabelType::IP_CONFIG,
+      LabelType::IP_ADDRESS_SUBNET,
+#if FEATURE_USE_IPV6
+      LabelType::IP6_LOCAL,
+      LabelType::IP6_GLOBAL,
+//      LabelType::IP6_ALL_ADDRESSES,
+#endif
+      LabelType::GATEWAY,
+      LabelType::CLIENT_IP,
+      LabelType::DNS,
+      LabelType::ALLOWED_IP_RANGE,
+      LabelType::CONNECTED,
+      LabelType::NUMBER_RECONNECTS,
 
-  addRowLabelValue(LabelType::IP_CONFIG);
-  addRowLabelValue(LabelType::IP_ADDRESS_SUBNET);
-  addRowLabelValue(LabelType::GATEWAY);
-  addRowLabelValue(LabelType::CLIENT_IP);
-  addRowLabelValue(LabelType::DNS);
-  addRowLabelValue(LabelType::ALLOWED_IP_RANGE);
-  addRowLabelValue(LabelType::CONNECTED);
-  addRowLabelValue(LabelType::NUMBER_RECONNECTS);
+      LabelType::MAX_LABEL
+    };
+
+    addRowLabelValues(labels);
+  }
 
   addTableSeparator(F("WiFi"), 2, 3, F("Wifi"));
 
@@ -439,6 +476,17 @@ void handle_sysinfo_Network() {
     addHtml(WiFi.BSSIDstr());
     addHtml(')');
   } else addHtml('-');
+
+  #ifdef ESP32
+  const int64_t tsf_time = WiFi_get_TSF_time();
+  if (tsf_time > 0) {
+    addRowLabel(F("WiFi TSF time"));
+    // Split it while printing, so we're not loosing a lot of decimals in the float conversion
+    addHtml(secondsToDayHourMinuteSecond(tsf_time / 1000000));
+    addHtml('.');    
+    addHtmlInt(tsf_time % 1000000);
+  }
+  #endif
 
   addRowLabel(getLabel(LabelType::CHANNEL));
   if (showWiFiConnectionInfo) {
@@ -466,27 +514,37 @@ void handle_sysinfo_Network() {
 #ifndef WEBSERVER_SYSINFO_MINIMAL
 void handle_sysinfo_WiFiSettings() {
   addTableSeparator(F("WiFi Settings"), 2, 3);
-  addRowLabelValue(LabelType::FORCE_WIFI_BG);
-  addRowLabelValue(LabelType::RESTART_WIFI_LOST_CONN);
-# ifdef ESP8266
-  addRowLabelValue(LabelType::FORCE_WIFI_NOSLEEP);
-# endif // ifdef ESP8266
+
+  static const LabelType::Enum labels[] PROGMEM =
+  {
+    LabelType::FORCE_WIFI_BG,
+    LabelType::RESTART_WIFI_LOST_CONN,
+    LabelType::FORCE_WIFI_NOSLEEP,
 # ifdef SUPPORT_ARP
-  addRowLabelValue(LabelType::PERIODICAL_GRAT_ARP);
+    LabelType::PERIODICAL_GRAT_ARP,
 # endif // ifdef SUPPORT_ARP
-  addRowLabelValue(LabelType::CONNECTION_FAIL_THRESH);
-#ifdef ESP8266 // TD-er: Disable setting TX power on ESP32 as it seems to cause issues on IDF4.4
-  addRowLabelValue(LabelType::WIFI_TX_MAX_PWR);
-  addRowLabelValue(LabelType::WIFI_CUR_TX_PWR);
-  addRowLabelValue(LabelType::WIFI_SENS_MARGIN);
-  addRowLabelValue(LabelType::WIFI_SEND_AT_MAX_TX_PWR);
+    LabelType::CONNECTION_FAIL_THRESH,
+#if FEATURE_SET_WIFI_TX_PWR
+    LabelType::WIFI_TX_MAX_PWR,
+    LabelType::WIFI_CUR_TX_PWR,
+    LabelType::WIFI_SENS_MARGIN,
+    LabelType::WIFI_SEND_AT_MAX_TX_PWR,
 #endif
-  addRowLabelValue(LabelType::WIFI_NR_EXTRA_SCANS);
+    LabelType::WIFI_NR_EXTRA_SCANS,
 #ifdef USES_ESPEASY_NOW
-  addRowLabelValue(LabelType::USE_ESPEASY_NOW);
-  addRowLabelValue(LabelType::FORCE_ESPEASY_NOW_CHANNEL);
+    LabelType::USE_ESPEASY_NOW,
+    LabelType::FORCE_ESPEASY_NOW_CHANNEL,
 #endif
-  addRowLabelValue(LabelType::WIFI_USE_LAST_CONN_FROM_RTC);
+    LabelType::WIFI_USE_LAST_CONN_FROM_RTC,
+    LabelType::WAIT_WIFI_CONNECT,
+    LabelType::HIDDEN_SSID_SLOW_CONNECT,
+    LabelType::CONNECT_HIDDEN_SSID,
+    LabelType::SDK_WIFI_AUTORECONNECT,
+
+    LabelType::MAX_LABEL
+  };
+
+  addRowLabelValues(labels);
 }
 #endif
 
@@ -509,24 +567,41 @@ void handle_sysinfo_Firmware() {
   addRowLabelValue_copy(LabelType::BINARY_FILENAME);
   addRowLabelValue_copy(LabelType::BUILD_PLATFORM);
   addRowLabelValue_copy(LabelType::GIT_HEAD);
+  #ifdef CONFIGURATION_CODE
+  addRowLabelValue_copy(LabelType::CONFIGURATION_CODE_LBL);
+  #endif  // ifdef CONFIGURATION_CODE
 }
 
 #ifndef WEBSERVER_SYSINFO_MINIMAL
 void handle_sysinfo_SystemStatus() {
   addTableSeparator(F("System Status"), 2, 3);
 
-  // Actual Loglevel
-  addRowLabelValue(LabelType::SYSLOG_LOG_LEVEL);
-  addRowLabelValue(LabelType::SERIAL_LOG_LEVEL);
-  addRowLabelValue(LabelType::WEB_LOG_LEVEL);
-  # if FEATURE_SD
-  addRowLabelValue(LabelType::SD_LOG_LEVEL);
-  # endif // if FEATURE_SD
+  static const LabelType::Enum labels[] PROGMEM =
+  {
+    // Actual Loglevel
+    LabelType::SYSLOG_LOG_LEVEL,
+    LabelType::SERIAL_LOG_LEVEL,
+    LabelType::WEB_LOG_LEVEL,
+# if FEATURE_SD
+    LabelType::SD_LOG_LEVEL,
+# endif // if FEATURE_SD
 
+    LabelType::ENABLE_SERIAL_PORT_CONSOLE,
+    LabelType::CONSOLE_SERIAL_PORT,
+#if USES_ESPEASY_CONSOLE_FALLBACK_PORT
+    LabelType::CONSOLE_FALLBACK_TO_SERIAL0,
+    LabelType::CONSOLE_FALLBACK_PORT,
+#endif
+    LabelType::MAX_LABEL
+  };
+
+  addRowLabelValues(labels);
+#if FEATURE_CLEAR_I2C_STUCK
   if (Settings.EnableClearHangingI2Cbus()) {
     addRowLabelValue(LabelType::I2C_BUS_STATE);
     addRowLabelValue(LabelType::I2C_BUS_CLEARED_COUNT);
   }
+#endif
 }
 #endif
 
@@ -555,39 +630,41 @@ void handle_sysinfo_ESP_Board() {
 
 
   addRowLabel(LabelType::ESP_CHIP_ID);
-  {
-    addHtmlInt(getChipId());
-    addHtml(' ', '(');
-    addHtml(formatToHex(getChipId(), 6));
-    addHtml(')');
-  }
+
+  const uint32_t chipID = getChipId();
+  addHtml(strformat(
+    F("%d (%s)"), 
+    chipID, 
+    formatToHex(chipID, 6).c_str()));
 
   addRowLabelValue(LabelType::ESP_CHIP_FREQ);
   addHtml(F(" MHz"));
-#ifdef ESP32
+#   ifdef ESP32
   addRowLabelValue(LabelType::ESP_CHIP_XTAL_FREQ);
   addHtml(F(" MHz"));
   addRowLabelValue(LabelType::ESP_CHIP_APB_FREQ);
   addHtml(F(" MHz"));
-#endif
+#   endif // ifdef ESP32
 
   addRowLabelValue(LabelType::ESP_CHIP_MODEL);
+#   if defined(ESP32)
 
-  # if defined(ESP32)
+  addRowLabel(F("ESP Chip Features"));
+  addHtml(getChipFeaturesString());
+  
   addRowLabelValue(LabelType::ESP_CHIP_REVISION);
-  # endif // if defined(ESP32)
+#   endif // if defined(ESP32)
   addRowLabelValue(LabelType::ESP_CHIP_CORES);
-  addRowLabelValue(LabelType::ESP_BOARD_NAME);
+  addRowLabelValue(LabelType::BOARD_NAME);
 }
-#endif
 
-#ifndef WEBSERVER_SYSINFO_MINIMAL
+#  endif // ifndef WEBSERVER_SYSINFO_MINIMAL
+
+#  ifndef WEBSERVER_SYSINFO_MINIMAL
 void handle_sysinfo_Storage() {
   addTableSeparator(F("Storage"), 2, 3);
 
-  uint32_t flashChipId = getFlashChipId();
-
-  if (flashChipId != 0) {
+  if (getFlashChipId() != 0) {
     addRowLabel(LabelType::FLASH_CHIP_ID);
 
 
@@ -609,6 +686,11 @@ void handle_sysinfo_Storage() {
     }
     addHtml(F(" Device: "));
     addHtml(getValue(LabelType::FLASH_CHIP_MODEL));
+    #ifdef ESP32
+    if (getChipFeatures().embeddedFlash) {
+      addHtml(F(" (Embedded)"));
+    }
+    #endif
   }
   const uint32_t realSize = getFlashRealSizeInBytes();
   const uint32_t ideSize  = ESP.getFlashChipSize();
@@ -633,22 +715,18 @@ void handle_sysinfo_Storage() {
   addRowLabelValue(LabelType::FLASH_IDE_MODE);
 
   addRowLabel(LabelType::FLASH_WRITE_COUNT);
-  {
-    addHtmlInt(RTC.flashDayCounter);
-    addHtml(F(" daily / "));
-    addHtmlInt(static_cast<int>(RTC.flashCounter));
-    addHtml(F(" boot"));
-  }
+  addHtml(strformat(
+    F("%d daily / %d boot"),
+    RTC.flashDayCounter,
+    static_cast<int>(RTC.flashCounter)));
 
   {
     // FIXME TD-er: Must also add this for ESP32.
     addRowLabel(LabelType::SKETCH_SIZE);
-    {
-      addHtmlInt(getSketchSize() / 1024);
-      addHtml(F(" kB ("));
-      addHtmlInt(getFreeSketchSpace() / 1024);
-      addHtml(F(" kB free)"));
-    }
+    addHtml(strformat(
+      F("%d kB (%d kB free)"),
+      getSketchSize() / 1024,
+      getFreeSketchSpace() / 1024));
 
     uint32_t maxSketchSize;
     bool     use2step;
@@ -657,12 +735,10 @@ void handle_sysinfo_Storage() {
     # endif // if defined(ESP8266)
     OTA_possible(maxSketchSize, use2step);
     addRowLabel(LabelType::MAX_OTA_SKETCH_SIZE);
-    {
-      addHtmlInt(maxSketchSize / 1024);
-      addHtml(F(" kB ("));
-      addHtmlInt(maxSketchSize);
-      addHtml(F(" bytes)"));
-    }
+    addHtml(strformat(
+      F("%d kB (%d bytes)"),
+      maxSketchSize / 1024,
+      maxSketchSize));
 
     # if defined(ESP8266)
     addRowLabel(LabelType::OTA_POSSIBLE);
@@ -674,12 +750,11 @@ void handle_sysinfo_Storage() {
   }
 
   addRowLabel(LabelType::FS_SIZE);
-  {
-    addHtmlInt(SpiffsTotalBytes() / 1024);
-    addHtml(F(" kB ("));
-    addHtmlInt(SpiffsFreeSpace() / 1024);
-    addHtml(F(" kB free)"));
-  }
+  addHtml(strformat(
+    F("%d kB (%d kB free)"),
+    SpiffsTotalBytes() / 1024,
+    SpiffsFreeSpace() / 1024));
+
   # ifndef LIMIT_BUILD_SIZE
   addRowLabel(F("Page size"));
   addHtmlInt(SpiffsPagesize());
@@ -704,7 +779,7 @@ void handle_sysinfo_Storage() {
   }
   # endif // ifndef LIMIT_BUILD_SIZE
 
-# ifndef BUILD_MINIMAL_OTA
+#if FEATURE_CHART_STORAGE_LAYOUT
 
   if (showSettingsFileLayout) {
     addTableSeparator(F("Settings Files"), 2, 3);
@@ -717,16 +792,21 @@ void handle_sysinfo_Storage() {
     addHtml(F("(offset / size per item / index)"));
 
     for (int st = 0; st < static_cast<int>(SettingsType::Enum::SettingsType_MAX); ++st) {
-      SettingsType::Enum settingsType = static_cast<SettingsType::Enum>(st);
+      const SettingsType::Enum settingsType = static_cast<SettingsType::Enum>(st);
+      #if !FEATURE_NOTIFIER
+      if (settingsType == SettingsType::Enum::NotificationSettings_Type) {
+        continue;
+      }
+      #endif
       html_TR_TD();
       addHtml(SettingsType::getSettingsTypeString(settingsType));
       html_BR();
       addHtml(SettingsType::getSettingsFileName(settingsType));
       html_TD();
       getStorageTableSVG(settingsType);
+      delay(1);
     }
   }
-# endif // ifndef BUILD_MINIMAL_OTA
 
   # ifdef ESP32
   addTableSeparator(F("Partitions"), 2, 3,
@@ -744,6 +824,15 @@ void handle_sysinfo_Storage() {
   //   TXBuffer += getPartitionTable(ESP_PARTITION_TYPE_APP , F(" - "), F("<BR>"));
   getPartitionTableSVG(ESP_PARTITION_TYPE_APP, 0xab56e6);
   # endif // ifdef ESP32
+
+  #ifdef ESP8266
+  addTableSeparator(F("Partitions"), 2, 3);
+
+  addRowLabel(F("Partition Table"));
+
+  getPartitionTableSVG();
+  #endif
+#endif
 }
 #endif
 

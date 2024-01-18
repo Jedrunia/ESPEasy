@@ -4,7 +4,10 @@
 
 
 P070_data_struct::~P070_data_struct() {
-  reset();
+  if (Plugin_070_pixels != nullptr) {
+    delete Plugin_070_pixels;
+    Plugin_070_pixels = nullptr;
+  }
 }
 
 void P070_data_struct::reset() {
@@ -15,9 +18,9 @@ void P070_data_struct::reset() {
 }
 
 void P070_data_struct::init(struct EventStruct *event) {
-  if (!Plugin_070_pixels)
+  if (nullptr == Plugin_070_pixels)
   {
-    Plugin_070_pixels = new (std::nothrow) Adafruit_NeoPixel(NUMBER_LEDS, CONFIG_PIN1, NEO_GRB + NEO_KHZ800);
+    Plugin_070_pixels = new (std::nothrow) NeoPixelBus_wrapper(NUMBER_LEDS, CONFIG_PIN1, NEO_GRB + NEO_KHZ800);
 
     if (Plugin_070_pixels == nullptr) {
       return;

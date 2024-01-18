@@ -93,18 +93,25 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_I2C_GET_ADDRESS
+    case PLUGIN_I2C_GET_ADDRESS:
+    {
+      event->Par1 = P027_I2C_ADDR;
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_I2C_GET_ADDRESS
+
     case PLUGIN_WEBFORM_LOAD:
     {
       {
-        uint8_t choiceMode                       = PCONFIG(0);
         const __FlashStringHelper *optionsMode[] = { F("32V, 2A"), F("32V, 1A"), F("16V, 0.4A") };
-        int optionValuesMode[]                   = { 0, 1, 2 };
-        addFormSelector(F("Measure range"), F("p027_range"), 3, optionsMode, optionValuesMode, choiceMode);
+        const int optionValuesMode[]             = { 0, 1, 2 };
+        addFormSelector(F("Measure range"), F("range"), 3, optionsMode, optionValuesMode, PCONFIG(0));
       }
       {
-        uint8_t choiceMeasureType             = PCONFIG(2);
-        const __FlashStringHelper *options[4] = { F("Voltage"), F("Current"), F("Power"), F("Voltage/Current/Power") };
-        addFormSelector(F("Measurement Type"), F("p027_measuretype"), 4, options, nullptr, choiceMeasureType);
+        const __FlashStringHelper *options[] = { F("Voltage"), F("Current"), F("Power"), F("Voltage/Current/Power") };
+        addFormSelector(F("Measurement Type"), F("measuretype"), 4, options, nullptr, PCONFIG(2));
       }
 
       success = true;
@@ -113,9 +120,9 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
-      PCONFIG(0) = getFormItemInt(F("p027_range"));
+      PCONFIG(0) = getFormItemInt(F("range"));
       PCONFIG(1) = getFormItemInt(F("i2c_addr"));
-      PCONFIG(2) = getFormItemInt(F("p027_measuretype"));
+      PCONFIG(2) = getFormItemInt(F("measuretype"));
       success    = true;
       break;
     }
@@ -186,15 +193,15 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
         float current = P027_data->getCurrent_mA() / 1000;
         float power   = voltage * current;
 
-        UserVar[event->BaseVarIndex]     = voltage;
-        UserVar[event->BaseVarIndex + 1] = current;
-        UserVar[event->BaseVarIndex + 2] = power;
+        UserVar.setFloat(event->TaskIndex, 0, voltage);
+        UserVar.setFloat(event->TaskIndex, 1, current);
+        UserVar.setFloat(event->TaskIndex, 2, power);
 
         const bool mustLog = loglevelActiveFor(LOG_LEVEL_INFO);
         String     log;
 
         if (mustLog) {
-          log  = formatToHex(P027_I2C_ADDR, F("INA219 0x"), 2);
+          log = formatToHex(P027_I2C_ADDR, F("INA219 0x"), 2);
         }
 
         // for backward compability we allow the user to select if only one measurement should be returned
@@ -203,7 +210,7 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
           case 0:
           {
             event->sensorType            = Sensor_VType::SENSOR_TYPE_SINGLE;
-            UserVar[event->BaseVarIndex] = voltage;
+            UserVar.setFloat(event->TaskIndex, 0, voltage);
 
             if (mustLog) {
               log += F(": Voltage: ");
@@ -214,7 +221,7 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
           case 1:
           {
             event->sensorType            = Sensor_VType::SENSOR_TYPE_SINGLE;
-            UserVar[event->BaseVarIndex] = current;
+            UserVar.setFloat(event->TaskIndex, 0, current);
 
             if (mustLog) {
               log += F(" Current: ");
@@ -225,7 +232,7 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
           case 2:
           {
             event->sensorType            = Sensor_VType::SENSOR_TYPE_SINGLE;
-            UserVar[event->BaseVarIndex] = power;
+            UserVar.setFloat(event->TaskIndex, 0, power);
 
             if (mustLog) {
               log += F(" Power: ");
@@ -236,9 +243,9 @@ boolean Plugin_027(uint8_t function, struct EventStruct *event, String& string)
           case 3:
           {
             event->sensorType                = Sensor_VType::SENSOR_TYPE_TRIPLE;
-            UserVar[event->BaseVarIndex]     = voltage;
-            UserVar[event->BaseVarIndex + 1] = current;
-            UserVar[event->BaseVarIndex + 2] = power;
+            UserVar.setFloat(event->TaskIndex, 0, voltage);
+            UserVar.setFloat(event->TaskIndex, 1, current);
+            UserVar.setFloat(event->TaskIndex, 2, power);
 
             if (mustLog) {
               log += F(": Voltage: ");

@@ -17,13 +17,18 @@
 #ifdef ESP8266
 #define CHUNKED_BUFFER_SIZE         512
 #else 
-#define CHUNKED_BUFFER_SIZE         1360
+#define CHUNKED_BUFFER_SIZE         1400
 #endif
 
 Web_StreamingBuffer::Web_StreamingBuffer(void) : lowMemorySkip(false),
   initialRam(0), beforeTXRam(0), duringTXRam(0), finalRam(0), maxCoreUsage(0),
   maxServerUsage(0), sentBytes(0), flashStringCalls(0), flashStringData(0)
 {
+  // Make sure this is allocated on the DRAM since access to primary heap is faster
+  # ifdef USE_SECOND_HEAP
+  HeapSelectDram ephemeral;
+  # endif // ifdef USE_SECOND_HEAP
+
   buf.reserve(CHUNKED_BUFFER_SIZE + 50);
   buf.clear();
 }
@@ -48,9 +53,11 @@ Web_StreamingBuffer& Web_StreamingBuffer::operator+=(const float& a)           {
   return addString(toString(a, 2));
 }
 
+#if FEATURE_USE_DOUBLE_AS_ESPEASY_RULES_FLOAT_TYPE
 Web_StreamingBuffer& Web_StreamingBuffer::operator+=(const double& a)          {
   return addString(doubleToString(a));
 }
+#endif
 
 Web_StreamingBuffer& Web_StreamingBuffer::operator+=(const String& a)          {
   return addString(a);
@@ -64,7 +71,7 @@ Web_StreamingBuffer& Web_StreamingBuffer::operator+=(const __FlashStringHelper* 
   return addFlashString((PGM_P)str);
 }
 
-Web_StreamingBuffer& Web_StreamingBuffer::addFlashString(PGM_P str) {
+Web_StreamingBuffer& Web_StreamingBuffer::addFlashString(PGM_P str, int length) {
   #ifdef USE_SECOND_HEAP
   HeapSelectDram ephemeral;
   #endif
@@ -94,36 +101,29 @@ Web_StreamingBuffer& Web_StreamingBuffer::addFlashString(PGM_P str) {
   ++flashStringCalls;
 
   if (lowMemorySkip) { return *this; }
-  const unsigned int length = strlen_P((PGM_P)str);
-
-  if (length == 0) { return *this; }
-  flashStringData += length;
 
   checkFull();
 
   int flush_step = CHUNKED_BUFFER_SIZE - this->buf.length();
   if (flush_step < 1) { flush_step = 0; }
 
-  /*
-  // This part does act strange on 1 heap builds
-  // See: https://github.com/letscontrolit/ESPEasy/pull/3680#issuecomment-1031716163
-  if (length < static_cast<unsigned int>(flush_step)) {
-    // Just use the faster String operator to copy flash strings.
-    // Very likely casting it to FPSTR first does fix the crashes, but it does not yield any noticable speed improvements
-    this->buf += FPSTR(str); 
-    return *this;
-  }
-  */
   {
     // Copy to internal buffer and send in chunks
-    unsigned int pos          = 0;
-    while (pos < length) {
+    PGM_P pos = str;
+    while (length != 0) {
       if (flush_step == 0) {
         flush();
         flush_step = CHUNKED_BUFFER_SIZE;
       }
-      this->buf += (char)pgm_read_byte(&str[pos]);
+      const char c = (char)pgm_read_byte(pos);
+      if (c == '\0' && length < 0) {
+        // Only check for \0 when length was given (e.g. binary data)
+        return *this;
+      }
+      this->buf += c;
+      ++flashStringData;
       ++pos;
+      --length;
       --flush_step;
     }
   }
@@ -131,6 +131,10 @@ Web_StreamingBuffer& Web_StreamingBuffer::addFlashString(PGM_P str) {
 }
 
 Web_StreamingBuffer& Web_StreamingBuffer::addString(const String& a) {
+  # ifdef USE_SECOND_HEAP
+  HeapSelectDram ephemeral;
+  # endif // ifdef USE_SECOND_HEAP
+
   if (lowMemorySkip) { return *this; }
   const unsigned int length = a.length();
   if (length == 0) { return *this; }
@@ -148,14 +152,16 @@ Web_StreamingBuffer& Web_StreamingBuffer::addString(const String& a) {
 
   unsigned int pos = 0;
   while (pos < length) {
-    if (flush_step == 0) {
+    if (flush_step <= 0) {
       flush();
       flush_step = CHUNKED_BUFFER_SIZE;
     } else {
-      // Just copy per byte instead of using substring as substring needs to allocate memory.
-      this->buf += a[pos];
-      ++pos;
-      --flush_step;
+      const int remaining = length - pos;
+      const int fetchLength = flush_step >= remaining ? remaining : flush_step;
+      const char* ch = a.begin() + pos;
+      this->buf.concat(ch, static_cast<unsigned int>(fetchLength));
+      pos += fetchLength;
+      flush_step -= fetchLength;
     }
   }
   return *this;
@@ -188,8 +194,11 @@ void Web_StreamingBuffer::startStream(const __FlashStringHelper * origin, int ht
   startStream(false, F("text/html"), origin, httpCode);
 }
 
-void Web_StreamingBuffer::startStream(const __FlashStringHelper * content_type, const __FlashStringHelper * origin, int httpCode) {
-  startStream(false, content_type, origin, httpCode);
+void Web_StreamingBuffer::startStream(const __FlashStringHelper * content_type,
+                                      const __FlashStringHelper * origin, 
+                                      int httpCode, 
+                                      bool cacheable) {
+  startStream(false, content_type, origin, httpCode, cacheable);
 }
 
 
@@ -200,7 +209,8 @@ void Web_StreamingBuffer::startJsonStream() {
 void Web_StreamingBuffer::startStream(bool allowOriginAll, 
                                       const __FlashStringHelper * content_type, 
                                       const __FlashStringHelper * origin,
-                                      int httpCode) {
+                                      int httpCode,
+                                      bool cacheable) {
   #ifdef USE_SECOND_HEAP
   HeapSelectDram ephemeral;
   #endif
@@ -220,7 +230,7 @@ void Web_StreamingBuffer::startStream(bool allowOriginAll,
       #endif // if defined(ESP8266)
     return;
   } else {
-    sendHeaderBlocking(allowOriginAll, content_type, origin, httpCode);
+    sendHeaderBlocking(allowOriginAll, content_type, origin, httpCode, cacheable);
   }
 }
 
@@ -257,15 +267,13 @@ void Web_StreamingBuffer::endStream() {
     if (buf.length() > 0) { sendContentBlocking(buf); }
     buf.clear();
     sendContentBlocking(buf);
-    #ifdef ESP8266
-    web_server.client().flush(100);
-    #endif
-    #ifdef ESP32
+
     web_server.client().flush();
-    #endif
+
     finalRam = ESP.getFreeHeap();
 
-    /*
+/*
+#ifndef BUILD_NO_DEBUG
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
         String log = String("Ram usage: Webserver only: ") + maxServerUsage +
                     " including Core: " + maxCoreUsage +
@@ -273,14 +281,15 @@ void Web_StreamingBuffer::endStream() {
                     " flashStringData: " + flashStringData;
         addLog(LOG_LEVEL_DEBUG, log);
         }
-      */
+#endif // ifndef BUILD_NO_DEBUG
+*/
+
   } else {
-    addLog(LOG_LEVEL_ERROR, String("Webpage skipped: low memory: ") + finalRam);
+    if (loglevelActiveFor(LOG_LEVEL_ERROR))
+      addLog(LOG_LEVEL_ERROR, concat("Webpage skipped: low memory: ", finalRam));
     lowMemorySkip = false;
   }
 }
-
-
 
 
 void Web_StreamingBuffer::sendContentBlocking(String& data) {
@@ -293,12 +302,10 @@ void Web_StreamingBuffer::sendContentBlocking(String& data) {
   const uint32_t length   = data.length();
 #ifndef BUILD_NO_DEBUG
   if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
-    String log;
-    log += F("sendcontent free: ");
-    log += ESP.getFreeHeap();
-    log += F(" chunk size:");
-    log += length;
-    addLogMove(LOG_LEVEL_DEBUG_DEV, log);
+    addLogMove(LOG_LEVEL_DEBUG_DEV, strformat(
+      F("sendcontent free: %u  chunk size: %u"), 
+      ESP.getFreeHeap(), 
+      length));
   }
 #endif // ifndef BUILD_NO_DEBUG
   const uint32_t freeBeforeSend = ESP.getFreeHeap();
@@ -320,14 +327,16 @@ void Web_StreamingBuffer::sendContentBlocking(String& data) {
   if (length > 0) { web_server.sendContent(data); }
   web_server.sendContent("\r\n");
 #else // ESP8266 2.4.0rc2 and higher and the ESP32 webserver supports chunked http transfer
-  unsigned int timeout = 1;
+  unsigned int timeout = 100;
 
-  if (freeBeforeSend < 5000) { timeout = 100; }
-
-  if (freeBeforeSend < 4000) { timeout = 300; }
   web_server.sendContent(data);
 
-  data.clear();
+  if (data.length() > (CHUNKED_BUFFER_SIZE + 1)) {
+    data = String(); // Clear also allocated memory
+  } else {
+    data.clear();
+  }
+
   const uint32_t beginWait = millis();
   while ((!data.reserve(CHUNKED_BUFFER_SIZE) || (ESP.getFreeHeap() < 4000 /*freeBeforeSend*/ )) &&
          !timeOutReached(beginWait + timeout)) {
@@ -350,7 +359,8 @@ void Web_StreamingBuffer::sendContentBlocking(String& data) {
 void Web_StreamingBuffer::sendHeaderBlocking(bool allowOriginAll, 
                                              const String& content_type, 
                                              const String& origin,
-                                             int httpCode) {
+                                             int httpCode,
+                                             bool cacheable) {
   #ifdef USE_SECOND_HEAP
   HeapSelectDram ephemeral;
   #endif
@@ -372,15 +382,14 @@ void Web_StreamingBuffer::sendHeaderBlocking(bool allowOriginAll,
   }
   web_server.send(httpCode, content_type, EMPTY_STRING);
 #else // if defined(ESP8266) && defined(ARDUINO_ESP8266_RELEASE_2_3_0)
-  unsigned int timeout          = 0;
+  unsigned int timeout          = 100;
   const uint32_t freeBeforeSend = ESP.getFreeHeap();
 
-  if (freeBeforeSend < 5000) { timeout = 100; }
-
-  if (freeBeforeSend < 4000) { timeout = 1000; }
   const uint32_t beginWait = millis();
+
   web_server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  web_server.sendHeader(F("Cache-Control"), F("no-cache"));
+  if (!cacheable)
+    web_server.sendHeader(F("Cache-Control"), F("no-cache"));
 
   if (origin.length() > 0) {
     web_server.sendHeader(F("Access-Control-Allow-Origin"), origin);

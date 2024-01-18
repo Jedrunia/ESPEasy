@@ -3,6 +3,9 @@
 #if FEATURE_ETHERNET
 
 #include "../ESPEasyCore/ESPEasy_Log.h"
+#include "../Helpers/Networking.h"
+
+#include <ETH.h>
 
 // Bit numbers for Eth status
 #define ESPEASY_ETH_CONNECTED               0
@@ -21,7 +24,11 @@ bool EthernetEventData_t::EthConnectAllowed() const {
 }
 
 bool EthernetEventData_t::unprocessedEthEvents() const {
-  if (processedConnect && processedDisconnect && processedGotIP && processedDHCPTimeout)
+  if (processedConnect && processedDisconnect && processedGotIP && processedDHCPTimeout
+#if FEATURE_USE_IPV6
+      && processedGotIP6
+#endif
+  )
   {
     return false;
   }
@@ -41,8 +48,13 @@ void EthernetEventData_t::clearAll() {
   processedConnect          = true;
   processedDisconnect       = true;
   processedGotIP            = true;
+  #if FEATURE_USE_IPV6
+  processedGotIP6           = true;
+  #endif
   processedDHCPTimeout      = true;
   ethConnectAttemptNeeded  = true;
+  dns0_cache = IPAddress();
+  dns1_cache = IPAddress();
 }
 
 void EthernetEventData_t::markEthBegin() {
@@ -76,6 +88,9 @@ void EthernetEventData_t::setEthDisconnected() {
   processedConnect          = true;
   processedDisconnect       = true;
   processedGotIP            = true;
+  #if FEATURE_USE_IPV6
+  processedGotIP6           = true;
+  #endif
   processedDHCPTimeout      = true;
 
   ethStatus = ESPEASY_ETH_DISCONNECTED;
@@ -91,16 +106,25 @@ void EthernetEventData_t::setEthConnected() {
   setEthServicesInitialized();
 }
 
-void EthernetEventData_t::setEthServicesInitialized() {
+bool EthernetEventData_t::setEthServicesInitialized() {
   if (!unprocessedEthEvents() && !EthServicesInitialized()) {
     if (EthGotIP() && EthConnected()) {
+      if (valid_DNS_address(ETH.dnsIP(0))) {
+        dns0_cache = ETH.dnsIP(0);
+      }
+      if (valid_DNS_address(ETH.dnsIP(1))) {
+        dns1_cache = ETH.dnsIP(1);
+      }
+
       #ifndef BUILD_NO_DEBUG
       addLog(LOG_LEVEL_DEBUG, F("Eth : Eth services initialized"));
       #endif
       bitSet(ethStatus, ESPEASY_ETH_SERVICES_INITIALIZED);
       ethConnectInProgress = false;
+      return true;
     }
   }
+  return false;
 }
 
 void EthernetEventData_t::markGotIP() {
@@ -113,10 +137,19 @@ void EthernetEventData_t::markGotIP() {
   processedGotIP = false;
 }
 
+#if FEATURE_USE_IPV6
+void EthernetEventData_t::markGotIPv6(const IPAddress& ip6) {
+  processedGotIP6 = false;
+  unprocessed_IP6 = ip6;
+}
+#endif
+
+
 void EthernetEventData_t::markLostIP() {
   bitClear(ethStatus, ESPEASY_ETH_GOT_IP);
   bitClear(ethStatus, ESPEASY_ETH_SERVICES_INITIALIZED);
   lastGetIPmoment.clear();
+  processedGotIP = false;
 }
 
 void EthernetEventData_t::markDisconnect() {
@@ -135,6 +168,10 @@ void EthernetEventData_t::markDisconnect() {
 void EthernetEventData_t::markConnected() {
   lastConnectMoment.setNow();
   processedConnect    = false;
+#if FEATURE_USE_IPV6
+  ETH.enableIpV6();
+#endif
+
 }
 
 String EthernetEventData_t::ESPEasyEthStatusToString() const {
@@ -153,7 +190,6 @@ String EthernetEventData_t::ESPEasyEthStatusToString() const {
     }
   }
   return log;
-
 }
 
 #endif

@@ -77,10 +77,14 @@
 // CRC calculation is based on the works by Paul Stoffregen from the 1-Wire arduino library. Special
 // thanks to Greg Cook and the team behind reveng.sourceforge.net.
 
-
+/** Changelog
+ * 2023-07-24 tonhuisman: Fix compilation issues
+ * 2023-07-23 tonhuisman: Add Changelog
+ *                        Only destruct plugin instance if the 'main' task is being stopped (PLUGIN_EXIT)
+ */
 
 //edwin: Disabled for now: hardware is not generic enough and  uses lots of ram and iram,
-#ifdef PLUGIN_BUILD_DISABLED
+// #ifdef PLUGIN_BUILD_DISABLED
 
 #define PLUGIN_046_DEBUG            true                        // Shows received frames and crc in log@INFO
 
@@ -112,6 +116,8 @@ struct P046_data_struct {
   uint8_t Plugin_046_receivedData;                                   // Byte to store received bits
 
 };
+
+#include "./ESPEasy-Globals.h"
 
 P046_data_struct* P046_data = nullptr;
 
@@ -168,7 +174,8 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
             F("Unknown 3, uint8_t 19"),
           };
 
-          addFormSelector(F("Plugin function"), F("p046"), nrchoices, options, nullptr, choice);
+          addFormSelector(F("Plugin function"), F("p046"), nrchoices, options, nullptr, choice, true);
+          addFormNote(F("Changing the function will reload this page."));
         }
 
         if (choice==0) {
@@ -270,7 +277,7 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_EXIT:
       {
-        if (P046_data) {
+        if (P046_data && (PCONFIG(0) == 0)) { // Only destruct instance when main unit is stopped
           delete P046_data;
           P046_data = nullptr;
         }
@@ -309,6 +316,7 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
             break;
           }
         }
+        success = (nullptr != P046_data);
         break;
       }
 
@@ -335,7 +343,7 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
             P046_data->Plugin_046_MasterSlave = false;
             P046_data->Plugin_046_newData = false;
             #ifndef BUILD_NO_DEBUG
-            if (PLUGIN_046_DEBUG) {
+            #if PLUGIN_046_DEBUG
               String log = F("Ventus W266 Rcvd(");
               log += node_time.getTimeString(':');
               log += F(") ");
@@ -358,8 +366,8 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
               if (myHex > 0x39) { myHex += 7; }
               log += myHex;
               addLogMove(LOG_LEVEL_INFO, log);
-            }
-            #endif
+            #endif // PLUGIN_046_DEBUG
+            #endif // BUILD_NO_DEBUG
             if (crc != 00)
             {
               P046_data->Plugin_046_databuffer[0] = 0;                   // Not MagicByte, so not valid.
@@ -375,7 +383,7 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
         if (!P046_data) break;
         if (P046_data->Plugin_046_databuffer[0] == Plugin_046_MagicByte) // buffer[0] should be the MagicByte if valid
         {
-          UserVar[event->BaseVarIndex + 1] = 0;
+          UserVar.setFloat(event->TaskIndex, 1, 0);
           uint8_t choice = PCONFIG(0);   // Which instance?
           switch (choice)
           {
@@ -385,8 +393,8 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
               if (myTemp > 0x8000) { myTemp |= 0xffff0000; }                    // int @ esp8266 = 32 bits!
               float temperature = static_cast<float>(myTemp) / 10.0f; // Temperature
               uint8_t myHum = (P046_data->Plugin_046_databuffer[2] >> 4) * 10 + (P046_data->Plugin_046_databuffer[2] & 0x0f);
-              UserVar[event->BaseVarIndex] = temperature;
-              UserVar[event->BaseVarIndex + 1] = static_cast<float>(myHum);
+              UserVar.setFloat(event->TaskIndex, 0, temperature);
+              UserVar.setFloat(event->TaskIndex, 1, static_cast<float>(myHum));
               event->sensorType = Sensor_VType::SENSOR_TYPE_TEMP_HUM;
               break;
             }
@@ -395,9 +403,9 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
               const float average = static_cast<float>((P046_data->Plugin_046_databuffer[11] << 8) + P046_data->Plugin_046_databuffer[10]) / 10.0f;   // Wind speed average in m/s
               const float gust = static_cast<float>((P046_data->Plugin_046_databuffer[13] << 8) + P046_data->Plugin_046_databuffer[12]) / 10.0f;      // Wind speed gust in m/s
               const float bearing = static_cast<float>(P046_data->Plugin_046_databuffer[9] & 0x0f) * 22.5f;                              // Wind bearing (0-359)
-              UserVar[event->BaseVarIndex] = bearing;                                                     // degrees
-              UserVar[event->BaseVarIndex + 1] = average;
-              UserVar[event->BaseVarIndex + 2] = gust;
+              UserVar.setFloat(event->TaskIndex, 0, bearing);                                                     // degrees
+              UserVar.setFloat(event->TaskIndex, 1, average);
+              UserVar.setFloat(event->TaskIndex, 2, gust);
               event->sensorType = Sensor_VType::SENSOR_TYPE_WIND;
               break;
             }
@@ -417,14 +425,14 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
                   Plugin_046_rainmmph = 0;
                 }
               }
-              UserVar[event->BaseVarIndex] = Plugin_046_rainmmph;
-              UserVar[event->BaseVarIndex + 1] = raincnt;
+              UserVar.setFloat(event->TaskIndex, 0, Plugin_046_rainmmph);
+              UserVar.setFloat(event->TaskIndex, 1, raincnt);
               break;
             }
             case (3):
             {
               float uvindex = static_cast<float>(P046_data->Plugin_046_databuffer[17]) / 10.0f;
-              UserVar[event->BaseVarIndex] = uvindex;
+              UserVar.setFloat(event->TaskIndex, 0, uvindex);
               break;
             }
             case (4):
@@ -443,7 +451,7 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
                   Plugin_046_strikesph = 0;
                 }
               }
-              UserVar[event->BaseVarIndex] = Plugin_046_strikesph;
+              UserVar.setFloat(event->TaskIndex, 0, Plugin_046_strikesph);
               break;
             }
             case (5):
@@ -453,22 +461,22 @@ boolean Plugin_046(uint8_t function, struct EventStruct *event, String& string)
               {
                 distance = P046_data->Plugin_046_databuffer[18];
               }
-              UserVar[event->BaseVarIndex] = distance;
+              UserVar.setFloat(event->TaskIndex, 0, distance);
               break;
             }
             case (6):
             {
-              UserVar[event->BaseVarIndex] = P046_data->Plugin_046_databuffer[6];
+              UserVar.setFloat(event->TaskIndex, 0, P046_data->Plugin_046_databuffer[6]);
               break;
             }
             case (7):
             {
-              UserVar[event->BaseVarIndex] = P046_data->Plugin_046_databuffer[16];
+              UserVar.setFloat(event->TaskIndex, 0, P046_data->Plugin_046_databuffer[16]);
               break;
             }
             case (8):
             {
-              UserVar[event->BaseVarIndex] = P046_data->Plugin_046_databuffer[19];
+              UserVar.setFloat(event->TaskIndex, 0, P046_data->Plugin_046_databuffer[19]);
               break;
             }
           }   // switch
@@ -528,5 +536,5 @@ void Plugin_046_ISR_SCLK()                                      // Interrupt on 
       }
     }
   }
-#endif // PLUGIN_BUILD_DISABLED
+// #endif // PLUGIN_BUILD_DISABLED
 #endif // USES_P046

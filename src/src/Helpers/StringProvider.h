@@ -6,17 +6,23 @@
 struct LabelType {
   enum Enum : uint8_t {
     UNIT_NR,
+    #if FEATURE_ZEROFILLED_UNITNUMBER
+    UNIT_NR_0,
+    #endif // FEATURE_ZEROFILLED_UNITNUMBER
     UNIT_NAME,
     HOST_NAME,
 
     LOCAL_TIME,
     TIME_SOURCE,
     TIME_WANDER,
+    #if FEATURE_EXT_RTC
+    EXT_RTC_UTC_TIME,
+    #endif
     UPTIME,
     LOAD_PCT,            // 15.10
     LOOP_COUNT,          // 400
     CPU_ECO_MODE,        // true
-#ifdef ESP8266 // TD-er: Disable setting TX power on ESP32 as it seems to cause issues on IDF4.4
+#if FEATURE_SET_WIFI_TX_PWR
     WIFI_TX_MAX_PWR,     // Unit: 0.25 dBm, 0 = use default (do not set)
     WIFI_CUR_TX_PWR,     // Unit dBm of current WiFi TX power.
     WIFI_SENS_MARGIN,    // Margin in dB on top of sensitivity
@@ -53,18 +59,34 @@ struct LabelType {
 #endif // ifdef ESP32
 
     JSON_BOOL_QUOTES,
+#if FEATURE_TIMING_STATS
     ENABLE_TIMING_STATISTICS,
+#endif
     ENABLE_RULES_CACHING,
+    ENABLE_SERIAL_PORT_CONSOLE,
+    CONSOLE_SERIAL_PORT,
+#if USES_ESPEASY_CONSOLE_FALLBACK_PORT
+    CONSOLE_FALLBACK_TO_SERIAL0,
+    CONSOLE_FALLBACK_PORT,
+#endif
 //    ENABLE_RULES_EVENT_REORDER, // TD-er: Disabled for now
     TASKVALUESET_ALL_PLUGINS,
     ALLOW_OTA_UNLIMITED,
+#if FEATURE_CLEAR_I2C_STUCK
     ENABLE_CLEAR_HUNG_I2C_BUS,
+#endif
+    #if FEATURE_I2C_DEVICE_CHECK
+    ENABLE_I2C_DEVICE_CHECK,
+    #endif // if FEATURE_I2C_DEVICE_CHECK
 #ifndef BUILD_NO_RAM_TRACKER
     ENABLE_RAM_TRACKING,
 #endif
 #if FEATURE_AUTO_DARK_MODE
     ENABLE_AUTO_DARK_MODE,
 #endif
+#if FEATURE_RULES_EASY_COLOR_CODE
+    DISABLE_RULES_AUTOCOMPLETE,
+#endif // if FEATURE_RULES_EASY_COLOR_CODE
 
     BOOT_TYPE,               // Cold boot
     BOOT_COUNT,              // 0
@@ -82,6 +104,13 @@ struct LabelType {
     IP_SUBNET,               // 255.255.255.0
     IP_ADDRESS_SUBNET,       // 192.168.1.123 / 255.255.255.0
     GATEWAY,                 // 192.168.1.1
+#if FEATURE_USE_IPV6
+    IP6_LOCAL,
+    IP6_GLOBAL,
+//    IP6_ALL_ADDRESSES,
+//    IP6_ADDRESS_CDIR,
+//    IP6_GATEWAY,
+#endif
     CLIENT_IP,               // 192.168.1.67
     #if FEATURE_MDNS
     M_DNS,                   // breadboard.local
@@ -109,6 +138,10 @@ struct LabelType {
     FORCE_WIFI_NOSLEEP,
     PERIODICAL_GRAT_ARP,
     CONNECTION_FAIL_THRESH,
+    WAIT_WIFI_CONNECT,
+    HIDDEN_SSID_SLOW_CONNECT,
+    CONNECT_HIDDEN_SSID,
+    SDK_WIFI_AUTORECONNECT,
 
     BUILD_DESC,
     GIT_BUILD,
@@ -119,6 +152,9 @@ struct LabelType {
     BINARY_FILENAME,
     BUILD_PLATFORM,
     GIT_HEAD,
+    #ifdef CONFIGURATION_CODE
+    CONFIGURATION_CODE_LBL,
+    #endif // ifdef CONFIGURATION_CODE
 
 
     I2C_BUS_STATE,
@@ -140,7 +176,7 @@ struct LabelType {
     ESP_CHIP_MODEL,
     ESP_CHIP_REVISION,
     ESP_CHIP_CORES,
-    ESP_BOARD_NAME,
+    BOARD_NAME,
 
     FLASH_CHIP_ID,
     FLASH_CHIP_VENDOR,
@@ -158,12 +194,18 @@ struct LabelType {
     MAX_OTA_SKETCH_SIZE,
     OTA_2STEP,
     OTA_POSSIBLE,
+    #if FEATURE_INTERNAL_TEMPERATURE
+    INTERNAL_TEMPERATURE,
+    #endif // if FEATURE_INTERNAL_TEMPERATURE
 #if FEATURE_ETHERNET
     ETH_IP_ADDRESS,
     ETH_IP_SUBNET,
     ETH_IP_ADDRESS_SUBNET,
     ETH_IP_GATEWAY,
     ETH_IP_DNS,
+#if FEATURE_USE_IPV6
+    ETH_IP6_LOCAL,
+#endif
     ETH_MAC,
     ETH_DUPLEX,
     ETH_SPEED,
@@ -171,7 +213,9 @@ struct LabelType {
     ETH_SPEED_STATE,
     ETH_CONNECTED,
 #endif // if FEATURE_ETHERNET
+# if FEATURE_ETHERNET || defined(USES_ESPEASY_NOW)
     ETH_WIFI_MODE,
+#endif
     SUNRISE,
     SUNSET,
     ISNTP,

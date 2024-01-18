@@ -243,7 +243,7 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
           ILI9xxx_type_toString(ILI9xxx_type_e::ILI9488_320x480),
           # endif // ifdef P095_ENABLE_ILI948X
         };
-        const int hardwareOptions[] = {
+        constexpr int hardwareOptions[] = {
           static_cast<int>(ILI9xxx_type_e::ILI9341_240x320),
           static_cast<int>(ILI9xxx_type_e::ILI9342_240x320),
           static_cast<int>(ILI9xxx_type_e::ILI9481_320x480),
@@ -261,7 +261,7 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
         };
         addFormSelector(F("TFT display model"),
                         F("dsptype"),
-                        static_cast<int>(ILI9xxx_type_e::ILI9xxx_MAX),
+                        NR_ELEMENTS(hardwareOptions),
                         hardwareTypes,
                         hardwareOptions,
                         P095_CONFIG_FLAG_GET_TYPE);
@@ -285,16 +285,16 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
 
       {
         const __FlashStringHelper *commandTriggers[] = { // Be sure to use all options available in the enum (except MAX)!
-          P095_CommandTrigger_toString(P095_CommandTrigger::tft),
-          P095_CommandTrigger_toString(P095_CommandTrigger::ili9341),
-          P095_CommandTrigger_toString(P095_CommandTrigger::ili9342),
-          P095_CommandTrigger_toString(P095_CommandTrigger::ili9481),
+          F("tft"),
+          F("ili9341"),
+          F("ili9342"),
+          F("ili9481"),
           # ifdef P095_ENABLE_ILI948X
-          P095_CommandTrigger_toString(P095_CommandTrigger::ili9486),
-          P095_CommandTrigger_toString(P095_CommandTrigger::ili9488),
+          F("ili9486"),
+          F("ili9488"),
           # endif // ifdef P095_ENABLE_ILI948X
         };
-        const int commandTriggerOptions[] = {
+        constexpr int commandTriggerOptions[] = {
           static_cast<int>(P095_CommandTrigger::tft),
           static_cast<int>(P095_CommandTrigger::ili9341),
           static_cast<int>(P095_CommandTrigger::ili9342),
@@ -306,7 +306,7 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
         };
         addFormSelector(F("Write Command trigger"),
                         F("commandtrigger"),
-                        static_cast<int>(P095_CommandTrigger::MAX),
+                        NR_ELEMENTS(commandTriggerOptions),
                         commandTriggers,
                         commandTriggerOptions,
                         P095_CONFIG_FLAG_GET_CMD_TRIGGER);
@@ -344,17 +344,15 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
 
 
         for (uint8_t varNr = 0; varNr < P095_Nlines; varNr++) {
-          String line = F("Line ");
-          line += (varNr + 1);
-          addFormTextBox(line, getPluginCustomArgName(varNr), strings[varNr], P095_Nchars);
+          addFormTextBox(
+            concat(F("Line "), varNr + 1), 
+            getPluginCustomArgName(varNr), 
+            strings[varNr], 
+            P095_Nchars);
           remain -= (strings[varNr].length() + 1);
         }
       }
-      String remainStr;
-      remainStr.reserve(15);
-      remainStr  = F("Remaining: ");
-      remainStr += remain;
-      addUnit(remainStr);
+      addUnit(concat(F("Remaining: "), remain));
 
       success = true;
       break;
@@ -390,27 +388,30 @@ boolean Plugin_095(uint8_t function, struct EventStruct *event, String& string)
       set4BitToUL(lSettings, P095_CONFIG_FLAG_TYPE,        getFormItemInt(F("dsptype")));         // Bit 20..24 Hardwaretype
       P095_CONFIG_FLAGS = lSettings;
 
-      String   color   = webArg(F("pfgcolor"));
-      uint16_t fgcolor = ADAGFX_WHITE;     // Default to white when empty
+      {
+        String   color   = webArg(F("pfgcolor"));
+        uint16_t fgcolor = ADAGFX_WHITE;     // Default to white when empty
 
-      if (!color.isEmpty()) {
-        fgcolor = AdaGFXparseColor(color); // Reduce to rgb565
+        if (!color.isEmpty()) {
+          fgcolor = AdaGFXparseColor(color); // Reduce to rgb565
+        }
+        color = webArg(F("pbgcolor"));
+        uint16_t bgcolor = AdaGFXparseColor(color);
+
+        P095_CONFIG_COLORS = fgcolor | (bgcolor << 16); // Store as a single setting
       }
-      color = webArg(F("pbgcolor"));
-      uint16_t bgcolor = AdaGFXparseColor(color);
+      {
+        String strings[P095_Nlines];
 
-      P095_CONFIG_COLORS = fgcolor | (bgcolor << 16); // Store as a single setting
+        for (uint8_t varNr = 0; varNr < P095_Nlines; varNr++) {
+          strings[varNr] = webArg(getPluginCustomArgName(varNr));
+        }
 
-      String strings[P095_Nlines];
+        String error = SaveCustomTaskSettings(event->TaskIndex, strings, P095_Nlines, 0);
 
-      for (uint8_t varNr = 0; varNr < P095_Nlines; varNr++) {
-        strings[varNr] = webArg(getPluginCustomArgName(varNr));
-      }
-
-      String error = SaveCustomTaskSettings(event->TaskIndex, strings, P095_Nlines, 0);
-
-      if (error.length() > 0) {
-        addHtmlError(error);
+        if (error.length() > 0) {
+          addHtmlError(error);
+        }
       }
 
       success = true;

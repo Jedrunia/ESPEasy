@@ -1,6 +1,6 @@
 // This is a mash-up of the Due show() code + insights from Michael Miller's
 // ESP8266 work for the NeoPixelBus library: github.com/Makuna/NeoPixelBus
-// Needs to be a separate .c file to enforce IRAM_ATTR execution.
+// Needs to be a separate .c file to enforce ICACHE_RAM_ATTR execution.
 
 #if defined(ESP8266)
 
@@ -18,10 +18,10 @@ static inline uint32_t _getCycleCount(void) {
 
 #ifdef ESP8266
 IRAM_ATTR void espShow(
- uint8_t pin, uint8_t *pixels, uint32_t numBytes, __attribute__((unused)) boolean is800KHz) {
+ int16_t pin, uint8_t *pixels, uint32_t numBytes, __attribute__((unused)) boolean is800KHz) {
 #else
 void espShow(
- uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) {
+ int16_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) {
 #endif
 
 #define CYCLES_800_T0H  (F_CPU / 2500001) // 0.4us

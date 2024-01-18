@@ -3,7 +3,7 @@
 #ifdef USES_P085
 
 P085_data_struct::~P085_data_struct() {
-  reset();
+  modbus.reset();
 }
 
 void P085_data_struct::reset() {
@@ -13,10 +13,6 @@ void P085_data_struct::reset() {
 bool P085_data_struct::init(ESPEasySerialPort port, const int16_t serial_rx, const int16_t serial_tx, int8_t dere_pin,
                             unsigned int baudrate, uint8_t modbusAddress) {
   return modbus.init(port, serial_rx, serial_tx, baudrate, modbusAddress, dere_pin);
-}
-
-bool P085_data_struct::isInitialized() const {
-  return modbus.isInitialized();
 }
 
 const __FlashStringHelper* Plugin_085_valuename(uint8_t value_nr, bool displayString) {

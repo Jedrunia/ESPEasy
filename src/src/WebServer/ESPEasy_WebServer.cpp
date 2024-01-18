@@ -57,18 +57,18 @@
 #include "../Globals/CPlugins.h"
 #include "../Globals/Device.h"
 #include "../Globals/NetworkState.h"
-#include "../Globals/Protocol.h"
 #include "../Globals/SecuritySettings.h"
 #include "../Globals/Settings.h"
 
 #include "../Helpers/ESPEasy_Storage.h"
-#include "../Helpers/Hardware.h"
+#include "../Helpers/Hardware_device_info.h"
 #include "../Helpers/Networking.h"
 #include "../Helpers/OTA.h"
 #include "../Helpers/StringConverter.h"
 
 #include "../Static/WebStaticData.h"
 
+#include <uri/UriGlob.h>
 
 
 void safe_strncpy_webserver_arg(char *dest, const String& arg, size_t max_size) {
@@ -130,7 +130,7 @@ void sendHeadandTail_stdtemplate(bool Tail, bool rebooting) {
     }
 
     #ifndef BUILD_NO_DEBUG
-
+/*
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       const int nrArgs = web_server.args();
 
@@ -155,19 +155,20 @@ void sendHeadandTail_stdtemplate(bool Tail, bool rebooting) {
         addLogMove(LOG_LEVEL_INFO, log);
       }
     }
+  */
     #endif // ifndef BUILD_NO_DEBUG
   }
 }
 
 bool captivePortal() {
-  const bool fromAP = web_server.client().localIP() == apIP;
+  const IPAddress client_localIP = web_server.client().localIP();
+  const bool fromAP = client_localIP == apIP;
   const bool hasWiFiCredentials = SecuritySettings.hasWiFiCredentials();
   if (hasWiFiCredentials || !fromAP) {
     return false;
   }
   if (!isIP(web_server.hostHeader()) && web_server.hostHeader() != (NetworkGetHostname() + F(".local"))) {
-    String redirectURL = F("http://");
-    redirectURL += web_server.client().localIP().toString();
+    String redirectURL = concat(F("http://"), formatIP(client_localIP));
     #ifdef WEBSERVER_SETUP
     if (fromAP && !hasWiFiCredentials) {
       redirectURL += F("/setup");
@@ -198,7 +199,7 @@ void WebServerInit()
   web_server.on(F("/"),             handle_root);
   // Entries for several captive portal URLs.
   // Maybe not needed. Might be handled by notFound handler.
-  web_server.on(F("/generate_204"), handle_root);  //Android captive portal.
+  web_server.on(UriGlob("/generate_204*"), handle_root);  // Android captive portal. Handle "/generate_204_<uuid>"-like requests.
   web_server.on(F("/fwlink"),       handle_root);  //Microsoft captive portal.
   #endif // ifdef WEBSERVER_ROOT
   #ifdef WEBSERVER_ADVANCED
@@ -222,7 +223,7 @@ void WebServerInit()
 
 #ifdef USES_C016
 
-  // web_server.on(F("/dumpcache"),     handle_dumpcache);  // C016 specific entrie
+  web_server.on(F("/dumpcache"),     handle_dumpcache);  // C016 specific entrie
   web_server.on(F("/cache_json"), handle_cache_json); // C016 specific entrie
   web_server.on(F("/cache_csv"),  handle_cache_csv);  // C016 specific entrie
 #endif // USES_C016
@@ -289,6 +290,10 @@ void WebServerInit()
   web_server.on(F("/upload"),      HTTP_GET,  handle_upload);
   web_server.on(F("/upload"),      HTTP_POST, handle_upload_post, handleFileUpload);
 #endif // ifdef WEBSERVER_UPLOAD
+#if FEATURE_SD
+  web_server.on(F("/uploadsd"),    HTTP_GET,  handle_upload);
+  web_server.on(F("/uploadsd"),    HTTP_POST, handle_upload_post, handleSDFileUpload);
+#endif // if FEATURE_SD
 #ifdef WEBSERVER_WIFI_SCANNER
   web_server.on(F("/wifiscanner"), handle_wifiscanner);
 #endif // ifdef WEBSERVER_WIFI_SCANNER
@@ -315,7 +320,7 @@ void WebServerInit()
   // List of headers to be recorded
   // "If-None-Match" is used to see whether we need to serve a static file, or simply can reply with a 304 (not modified)
   const char * headerkeys[] = {"If-None-Match"};
-  const size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
+  constexpr size_t headerkeyssize = NR_ELEMENTS(headerkeys);
   web_server.collectHeaders(headerkeys, headerkeyssize );
   #if defined(ESP8266) || defined(ESP32)
   {
@@ -337,19 +342,17 @@ void WebServerInit()
   if (Settings.UseSSDP)
   {
     web_server.on(F("/ssdp.xml"), HTTP_GET, []() {
-      WiFiClient client(web_server.client());
-
       #ifdef MUSTFIX_CLIENT_TIMEOUT_IN_SECONDS
 
       // See: https://github.com/espressif/arduino-esp32/pull/6676
-      client.setTimeout((CONTROLLER_CLIENTTIMEOUT_DFLT + 500) / 1000); // in seconds!!!!
-      Client *pClient = &client;
-      pClient->setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);
+      web_server.client().setTimeout((CONTROLLER_CLIENTTIMEOUT_DFLT + 500) / 1000); // in seconds!!!!
+      Client &pClient = web_server.client();
+      pClient.setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);
       #else // ifdef MUSTFIX_CLIENT_TIMEOUT_IN_SECONDS
-      client.setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);                // in msec as it should be!
+      web_server.client().setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);                // in msec as it should be!
       #endif // ifdef MUSTFIX_CLIENT_TIMEOUT_IN_SECONDS
 
-      SSDP_schema(client);
+      SSDP_schema();
     });
     SSDP_begin();
   }
@@ -367,6 +370,7 @@ void setWebserverRunning(bool state) {
     web_server.begin(Settings.WebserverPort);
     addLog(LOG_LEVEL_INFO, F("Webserver: start"));
   } else {
+    web_server.client().stop();
     web_server.stop();
     addLog(LOG_LEVEL_INFO, F("Webserver: stop"));
   }
@@ -380,7 +384,7 @@ void getWebPageTemplateDefault(const String& tmplName, WebTemplateParser& parser
   const bool addMeta = true;
 
 /*
-  if (tmplName.equals(F("TmplAP")))
+  if (equals(tmplName, F("TmplAP")))
   {
 
     getWebPageTemplateDefaultHead(parser, addMeta, !addJS);
@@ -404,7 +408,7 @@ void getWebPageTemplateDefault(const String& tmplName, WebTemplateParser& parser
   }
   else 
   */
-  if (tmplName.equals(F("TmplMsg")))
+  if (equals(tmplName, F("TmplMsg")))
   {
     getWebPageTemplateDefaultHead(parser, !addMeta, !addJS);
     if (!parser.isTail()) {
@@ -418,7 +422,7 @@ void getWebPageTemplateDefault(const String& tmplName, WebTemplateParser& parser
     getWebPageTemplateDefaultContentSection(parser);
     getWebPageTemplateDefaultFooter(parser);
   }
-  else if (tmplName.equals(F("TmplDsh")))
+  else if (equals(tmplName, F("TmplDsh")))
   {
     getWebPageTemplateDefaultHead(parser, !addMeta, addJS);
     parser.process(F("<body"));
@@ -654,13 +658,17 @@ void addTaskSelect(const String& name,  taskIndex_t choice)
   addHtml(F("<select "));
   addHtmlAttribute(F("id"),       F("selectwidth"));
   addHtmlAttribute(F("name"),     name);
-  addHtmlAttribute(F("onchange"), F("return dept_onchange(frmselect)"));
+  addHtmlAttribute(F("onchange"), F("return task_select_onchange(frmselect)"));
   addHtml('>');
 
-  for (taskIndex_t x = 0; x < TASKS_MAX; x++)
+  for (taskIndex_t x = 0; x <= TASKS_MAX; x++)
   {
-    const deviceIndex_t DeviceIndex = getDeviceIndex_from_TaskIndex(x);
-    deviceName = getPluginNameFromDeviceIndex(DeviceIndex);
+    if (validTaskIndex(x)) {
+      const deviceIndex_t DeviceIndex = getDeviceIndex_from_TaskIndex(x);
+      deviceName = getPluginNameFromDeviceIndex(DeviceIndex);
+    } else {
+      deviceName = F("Not Set");
+    }
     {
       addHtml(F("<option value='"));
       addHtmlInt(x);
@@ -671,12 +679,14 @@ void addTaskSelect(const String& name,  taskIndex_t choice)
       }
     }
 
-    if (!validPluginID_fullcheck(Settings.TaskDeviceNumber[x])) {
+    if (validTaskIndex(x) && !validPluginID_fullcheck(Settings.getPluginID_for_task(x))) {
       addDisabled();
     }
     {
       addHtml('>');
-      addHtmlInt(x + 1);
+      if (validTaskIndex(x)) {
+        addHtmlInt(x + 1);
+      }
       addHtml(F(" - "));
       addHtml(deviceName);
       addHtml(F(" - "));
@@ -790,13 +800,24 @@ String getControllerSymbol(uint8_t index)
    }
  */
 
+void addSVG_param(const char key, int value)
+{
+  addHtml(strformat(F(" %c=\"%d\""), key, value));
+}
+
+void addSVG_param(const char key, float value)
+{
+  addSVG_param(key, toString(value, 2));
+}
+
+void addSVG_param(const char key, const String& value)
+{
+  addHtml(strformat(F(" %c=\"%s\""), key, value.c_str()));
+}
+
+
 void addSVG_param(const __FlashStringHelper * key, int value) {
-  addHtml(' ');
-  addHtml(key);
-  addHtml('=');
-  addHtml('\"');
-  addHtmlInt(value);
-  addHtml('\"');
+  addHtml(strformat(F(" %s=\"%d\""), String(key).c_str(), value));
 }
 
 void addSVG_param(const __FlashStringHelper * key, float value) {
@@ -804,12 +825,7 @@ void addSVG_param(const __FlashStringHelper * key, float value) {
 }
 
 void addSVG_param(const __FlashStringHelper * key, const String& value) {
-  addHtml(' ');
-  addHtml(key);
-  addHtml('=');
-  addHtml('\"');
-  addHtml(value);
-  addHtml('\"');
+  addHtml(strformat(F(" %s=\"%s\""), String(key).c_str(), value.c_str()));
 }
 
 void createSvgRect_noStroke(const __FlashStringHelper * classname, unsigned int fillColor, float xoffset, float yoffset, float width, float height, float rx, float ry) {
@@ -836,8 +852,8 @@ void createSvgRect(const String& classname,
     addSVG_param(F("stroke"),       formatToHex(strokeColor, F("#"), 3));
     addSVG_param(F("stroke-width"), strokeWidth);
   }
-  addSVG_param(F("x"),      xoffset);
-  addSVG_param(F("y"),      yoffset);
+  addSVG_param('x',         xoffset);
+  addSVG_param('y',         yoffset);
   addSVG_param(F("width"),  width);
   addSVG_param(F("height"), height);
   addSVG_param(F("rx"),     rx);
@@ -846,34 +862,37 @@ void createSvgRect(const String& classname,
 }
 
 void createSvgHorRectPath(unsigned int color, int xoffset, int yoffset, int size, int height, int range, float SVG_BAR_WIDTH) {
-  float width = SVG_BAR_WIDTH * size / range;
+  if (range == 0) {
+    range = 1;
+  }
+  float width = (SVG_BAR_WIDTH * size) / range;
 
   if (width < 2) { width = 2; }
   addHtml(formatToHex(color, F("<path fill=\"#")));
   addHtml(F("\" d=\"M"));
-  addHtml(toString(SVG_BAR_WIDTH * xoffset / range, 2));
+  addHtmlFloat((SVG_BAR_WIDTH * xoffset) / range);
   addHtml(' ');
   addHtmlInt(yoffset);
   addHtml('h');
-  addHtml(toString(width, 2));
+  addHtmlFloat(width);
   addHtml('v');
   addHtmlInt(height);
   addHtml('H');
-  addHtml(toString(SVG_BAR_WIDTH * xoffset / range, 2));
+  addHtmlFloat((SVG_BAR_WIDTH * xoffset) / range);
   addHtml(F("z\"/>\n"));
 }
 
 void createSvgTextElement(const String& text, float textXoffset, float textYoffset) {
-  addHtml(F("<text x=\""));
-  addHtml(toString(textXoffset, 2));
-  addHtml(F("\" y=\""));
-  addHtml(toString(textYoffset, 2));
-  addHtml(F("\" >\n"));
-  addHtml(F("<tspan x=\""));
-  addHtml(toString(textXoffset, 2));
-  addHtml(F("\" y=\""));
-  addHtml(toString(textYoffset, 2));
-  addHtml('"', '>');
+  addHtml(F("<text"));
+  addSVG_param('x', textXoffset);
+  addSVG_param('y', textYoffset);
+  addHtml('>', '\n');
+
+  addHtml(F("<tspan"));
+  addSVG_param('x', textXoffset);
+  addSVG_param('y', textYoffset);
+  addHtml('>');
+
   addHtml(text);
   addHtml(F("</tspan>\n</text>"));
 }
@@ -921,15 +940,15 @@ void write_SVG_image_header(int width, int height, bool useViewbox) {
 void getWiFi_RSSI_icon(int rssi, int width_pixels)
 {
   const int nbars_filled = (rssi + 100) / 8;
-  int nbars              = 5;
+  const int nbars        = 5;
   int white_between_bar  = (static_cast<float>(width_pixels) / nbars) * 0.2f;
 
   if (white_between_bar < 1) { white_between_bar = 1; }
   const int barWidth   = (width_pixels - (nbars - 1) * white_between_bar) / nbars;
-  int svg_width_pixels = nbars * barWidth + (nbars - 1) * white_between_bar;
+  const int svg_width_pixels = nbars * barWidth + (nbars - 1) * white_between_bar;
 
   write_SVG_image_header(svg_width_pixels, svg_width_pixels, true);
-  float scale               = 100.0f / svg_width_pixels;
+  const float scale         = 100.0f / svg_width_pixels;
   const int bar_height_step = 100 / nbars;
 
   for (int i = 0; i < nbars; ++i) {
@@ -940,14 +959,14 @@ void getWiFi_RSSI_icon(int rssi, int width_pixels)
   addHtml(F("</svg>\n"));
 }
 
-#ifndef BUILD_MINIMAL_OTA
+#if FEATURE_CHART_STORAGE_LAYOUT
 void getConfig_dat_file_layout() {
   const int shiftY  = 2;
   float     yOffset = shiftY;
 
   write_SVG_image_header(SVG_BAR_WIDTH + 250, SVG_BAR_HEIGHT + shiftY);
 
-  int max_index, offset, max_size;
+  int max_index, offset, max_size{};
   int struct_size = 0;
 
   // background
@@ -960,19 +979,20 @@ void getConfig_dat_file_layout() {
 
     if (SettingsType::getSettingsFile(settingsType) == SettingsType::SettingsFileEnum::FILE_CONFIG_type) {
       unsigned int color = SettingsType::getSVGcolor(settingsType);
-      SettingsType::getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size);
-
-      for (int i = 0; i < max_index; ++i) {
-        SettingsType::getSettingsParameters(settingsType, i, offset, max_size);
-
-        // Struct position
-        createSvgHorRectPath(color, offset, yOffset, max_size, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
+      if (SettingsType::getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size))
+      {
+        for (int i = 0; i < max_index; ++i) {
+          if (SettingsType::getSettingsParameters(settingsType, i, offset, max_size)) {
+            // Struct position
+            createSvgHorRectPath(color, offset, yOffset, max_size, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
+          }
+        }
       }
     }
   }
 
   // Text labels
-  float textXoffset = SVG_BAR_WIDTH + 2;
+  constexpr float textXoffset = SVG_BAR_WIDTH + 2;
   float textYoffset = yOffset + 0.9f * SVG_BAR_HEIGHT;
 
   createSvgTextElement(SettingsType::getSettingsFileName(SettingsType::Enum::TaskSettings_Type), textXoffset, textYoffset);
@@ -984,10 +1004,13 @@ void getStorageTableSVG(SettingsType::Enum settingsType) {
   unsigned int color  = SettingsType::getSVGcolor(settingsType);
   const int    shiftY = 2;
 
-  int max_index, offset, max_size;
+  int max_index, offset, max_size{};
   int struct_size = 0;
 
-  SettingsType::getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size);
+  if (!SettingsType::getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size))
+  {
+    return;
+  }
 
   if (max_index == 0) { return; }
 
@@ -996,23 +1019,23 @@ void getStorageTableSVG(SettingsType::Enum settingsType) {
   float yOffset = shiftY;
 
   for (int i = 0; i < max_index; ++i) {
-    SettingsType::getSettingsParameters(settingsType, i, offset, max_size);
+    if (SettingsType::getSettingsParameters(settingsType, i, offset, max_size)) {
+      // background
+      createSvgHorRectPath(0xcdcdcd, 0,      yOffset, realSize, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
 
-    // background
-    createSvgHorRectPath(0xcdcdcd, 0,      yOffset, realSize, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
+      // Struct position
+      createSvgHorRectPath(color,    offset, yOffset, max_size, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
 
-    // Struct position
-    createSvgHorRectPath(color,    offset, yOffset, max_size, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
-
-    // Text labels
-    float textXoffset = SVG_BAR_WIDTH + 2;
-    float textYoffset = yOffset + 0.9f * SVG_BAR_HEIGHT;
-    createSvgTextElement(formatHumanReadable(offset, 1024),   textXoffset, textYoffset);
-    textXoffset = SVG_BAR_WIDTH + 60;
-    createSvgTextElement(formatHumanReadable(max_size, 1024), textXoffset, textYoffset);
-    textXoffset = SVG_BAR_WIDTH + 130;
-    createSvgTextElement(String(i),                           textXoffset, textYoffset);
-    yOffset += SVG_BAR_HEIGHT;
+      // Text labels
+      float textXoffset = SVG_BAR_WIDTH + 2;
+      float textYoffset = yOffset + 0.9f * SVG_BAR_HEIGHT;
+      createSvgTextElement(formatHumanReadable(offset, 1024),   textXoffset, textYoffset);
+      textXoffset = SVG_BAR_WIDTH + 60;
+      createSvgTextElement(formatHumanReadable(max_size, 1024), textXoffset, textYoffset);
+      textXoffset = SVG_BAR_WIDTH + 130;
+      createSvgTextElement(String(i),                           textXoffset, textYoffset);
+      yOffset += SVG_BAR_HEIGHT;
+    }
   }
 
   // usage
@@ -1041,7 +1064,25 @@ void getStorageTableSVG(SettingsType::Enum settingsType) {
   addHtml(F("</svg>\n"));
 }
 
-#endif // ifndef BUILD_MINIMAL_OTA
+void drawPartitionChartSVG(
+                          float yOffset, 
+                          uint32_t realSize, 
+                          uint32_t partitionAddress, 
+                          uint32_t partitionSize,
+                          unsigned int partitionColor,
+                          const String& label,
+                          const String& name)
+{
+  createSvgHorRectPath(0xcdcdcd,       0,                yOffset, realSize,      SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
+  createSvgHorRectPath(partitionColor, partitionAddress, yOffset, partitionSize, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
+  float textXoffset = SVG_BAR_WIDTH + 2;
+  const float textYoffset = yOffset + 0.9f * SVG_BAR_HEIGHT;
+  createSvgTextElement(formatHumanReadable(partitionSize, 1024),          textXoffset, textYoffset);
+  textXoffset = SVG_BAR_WIDTH + 60;
+  createSvgTextElement(label, textXoffset, textYoffset);
+  textXoffset = SVG_BAR_WIDTH + 130;
+  createSvgTextElement(name, textXoffset, textYoffset);
+}
 
 #ifdef ESP32
 
@@ -1065,15 +1106,14 @@ void getPartitionTableSVG(uint8_t pType, unsigned int partitionColor) {
   if (_mypartiterator) {
     do {
       _mypart = esp_partition_get(_mypartiterator);
-      createSvgHorRectPath(0xcdcdcd,       0,                yOffset, realSize,      SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
-      createSvgHorRectPath(partitionColor, _mypart->address, yOffset, _mypart->size, SVG_BAR_HEIGHT - 2, realSize, SVG_BAR_WIDTH);
-      float textXoffset = SVG_BAR_WIDTH + 2;
-      float textYoffset = yOffset + 0.9f * SVG_BAR_HEIGHT;
-      createSvgTextElement(formatHumanReadable(_mypart->size, 1024),          textXoffset, textYoffset);
-      textXoffset = SVG_BAR_WIDTH + 60;
-      createSvgTextElement(_mypart->label,                                    textXoffset, textYoffset);
-      textXoffset = SVG_BAR_WIDTH + 130;
-      createSvgTextElement(getPartitionType(_mypart->type, _mypart->subtype), textXoffset, textYoffset);
+      drawPartitionChartSVG(
+        yOffset, 
+        realSize, 
+        _mypart->address, 
+        _mypart->size, 
+        partitionColor, 
+        _mypart->label,
+        getPartitionType(_mypart->type, _mypart->subtype));
       yOffset += SVG_BAR_HEIGHT;
     } while ((_mypartiterator = esp_partition_next(_mypartiterator)) != nullptr);
   }
@@ -1082,6 +1122,83 @@ void getPartitionTableSVG(uint8_t pType, unsigned int partitionColor) {
 }
 
 #endif // ifdef ESP32
+
+#ifdef ESP8266
+void getPartitionTableSVG() {
+  // sketch / OTA / FS / EEPROM / RFcal / wifi
+  const int nrPartitions = 6;
+  const int shiftY = 2;
+  write_SVG_image_header(SVG_BAR_WIDTH + 250, nrPartitions * SVG_BAR_HEIGHT + shiftY);
+  float yOffset = shiftY;
+
+  for (int i = 0; i < nrPartitions; ++i) {
+    const ESP8266_partition_type ptype = static_cast<ESP8266_partition_type>(i);
+    uint32_t partitionAddress = 0;
+    int32_t partitionSize = 0;
+    const int32_t partitionSector = getPartitionInfo(ptype, partitionAddress, partitionSize);
+
+    const __FlashStringHelper * label = F("");
+    String descr;
+    unsigned int partitionColor = 0xab56e6;
+    switch (ptype) {
+      case ESP8266_partition_type::sketch:
+        label = F("sketch");
+        partitionColor = 0xab56e6;
+        break;
+      case ESP8266_partition_type::ota:
+        label = F("ota");
+        partitionColor = 0x5856e6;
+        break;
+      case ESP8266_partition_type::fs:
+        label = F("fs");
+        partitionColor = 0xff7f00;
+        #ifdef USE_LITTLEFS
+        descr = F("LittleFS");
+        #else
+        descr = F("SPIFFS");
+        #endif
+        break;
+      case ESP8266_partition_type::eeprom:
+        label = F("eeprom");
+        descr = concat(F("sector:"), partitionSector);
+        partitionColor = 0x7fff00;
+        break;
+      case ESP8266_partition_type::rf_cal:
+        label = F("RFcal");
+        partitionColor = 0xff007f;
+        break;
+      case ESP8266_partition_type::wifi:
+        label = F("WiFi");
+        partitionColor = 0xff00ff;
+        break;
+
+    }
+
+    drawPartitionChartSVG(
+        yOffset, 
+        getFlashRealSizeInBytes(), 
+        partitionAddress, 
+        partitionSize, 
+        partitionColor, 
+        label,
+        descr);
+    yOffset += SVG_BAR_HEIGHT;
+
+/*
+    String debuglog = concat(F("partition: "), (i+1));
+    debuglog += concat(F(" FS_st: "), formatToHex((uint32_t)&_FS_start));
+    debuglog += concat(F(" FS_end: "), formatToHex((uint32_t)&_FS_end));
+    debuglog += concat(F(" EEPROM: "), formatToHex((uint32_t)&_EEPROM_start));
+    debuglog += concat(F(" addr: "), formatToHex(partitionAddress, 8));
+    debuglog += concat(F(" part.size: "), partitionSize);
+    debuglog += concat(F(" label: "), label);
+    addLog(LOG_LEVEL_INFO, debuglog);
+*/
+  }
+  addHtml(F("</svg>\n"));
+}
+#endif
+#endif
 
 bool webArg2ip(const __FlashStringHelper * arg, uint8_t *IP) {
   return str2ip(webArg(arg), IP);

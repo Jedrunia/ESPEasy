@@ -16,6 +16,36 @@
 # define P082_DEFAULT_FIX_TIMEOUT 2500 // TTL of fix status in ms since last update
 
 
+# define P082_TIMEOUT        PCONFIG(0)
+# define P082_TIMEOUT_LABEL  PCONFIG_LABEL(0)
+# define P082_BAUDRATE       PCONFIG(1)
+# define P082_BAUDRATE_LABEL PCONFIG_LABEL(1)
+# define P082_DISTANCE       PCONFIG(2)
+# define P082_DISTANCE_LABEL PCONFIG_LABEL(2)
+
+# define P082_QUERY1_CONFIG_POS  3
+# define P082_QUERY1         PCONFIG(3) // P082_QUERY1_CONFIG_POS
+# define P082_QUERY2         PCONFIG(4) // P082_QUERY1_CONFIG_POS + 1
+# define P082_QUERY3         PCONFIG(5) // P082_QUERY1_CONFIG_POS + 2
+# define P082_QUERY4         PCONFIG(6) // P082_QUERY1_CONFIG_POS + 3
+
+# define P082_LONG_REF       PCONFIG_FLOAT(0)
+# define P082_LAT_REF        PCONFIG_FLOAT(1)
+# ifdef P082_USE_U_BLOX_SPECIFIC
+#  define P082_POWER_MODE     PCONFIG(7)
+#  define P082_DYNAMIC_MODEL  PCONFIG_LONG(0)
+# endif // P082_USE_U_BLOX_SPECIFIC
+
+# define P082_NR_OUTPUT_VALUES   VARS_PER_TASK
+
+
+# define P082_DISTANCE_DFLT       0 // Disable update per distance travelled.
+# define P082_QUERY1_DFLT         P082_query::P082_QUERY_LONG
+# define P082_QUERY2_DFLT         P082_query::P082_QUERY_LAT
+# define P082_QUERY3_DFLT         P082_query::P082_QUERY_ALT
+# define P082_QUERY4_DFLT         P082_query::P082_QUERY_SPD
+
+
 enum class P082_query : uint8_t {
   P082_QUERY_LONG        = 0,
   P082_QUERY_LAT         = 1,
@@ -68,15 +98,17 @@ struct P082_data_struct : public PluginTaskData_base {
 
   P082_data_struct();
 
-  ~P082_data_struct();
+  virtual ~P082_data_struct();
 
-  void reset();
+//  void reset();
 
   bool init(ESPEasySerialPort port,
             const int16_t     serial_rx,
             const int16_t     serial_tx);
 
-  bool isInitialized() const;
+  bool isInitialized() const {
+    return gps != nullptr && easySerial != nullptr;
+  }
 
   bool loop();
 
@@ -86,7 +118,7 @@ struct P082_data_struct : public PluginTaskData_base {
 
   // Return the distance in meters compared to last stored position.
   // @retval  -1 when no fix.
-  double distanceSinceLast(unsigned int maxAge_msec);
+  ESPEASY_RULES_FLOAT_TYPE distanceSinceLast(unsigned int maxAge_msec);
 
   // Return the GPS time stamp, which is in UTC.
   // @param age is the time in msec since the last update of the time +
@@ -109,7 +141,11 @@ struct P082_data_struct : public PluginTaskData_base {
 #endif
 
 # if FEATURE_PLUGIN_STATS
-  bool webformLoad_show_stats(struct EventStruct *event, uint8_t var_index, P082_query query_type);
+  bool webformLoad_show_stats(struct EventStruct *event, uint8_t var_index, P082_query query_type) const;
+
+#if FEATURE_CHART_JS
+  void webformLoad_show_position_scatterplot(struct EventStruct *event);
+#endif
 # endif // if FEATURE_PLUGIN_STATS
 
 private:
@@ -131,11 +167,11 @@ public:
   TinyGPSPlus   *gps        = nullptr;
   ESPeasySerial *easySerial = nullptr;
 
-  double _last_lat = 0.0;
-  double _last_lng = 0.0;
-  double _ref_lat  = 0.0;
-  double _ref_lng  = 0.0;
-  double _distance = 0.0;
+  ESPEASY_RULES_FLOAT_TYPE _last_lat{};
+  ESPEASY_RULES_FLOAT_TYPE _last_lng{};
+  ESPEASY_RULES_FLOAT_TYPE _ref_lat{};
+  ESPEASY_RULES_FLOAT_TYPE _ref_lng{};
+  ESPEASY_RULES_FLOAT_TYPE _distance{};
 
 
   unsigned long _pps_time            = 0;
@@ -151,7 +187,7 @@ public:
   String _currentSentence;
 # endif // ifdef P082_SEND_GPS_TO_LOG
 
-  float _cache[static_cast<uint8_t>(P082_query::P082_NR_OUTPUT_OPTIONS)] = { 0 };
+  float _cache[static_cast<uint8_t>(P082_query::P082_NR_OUTPUT_OPTIONS)]{};
 };
 
 #endif // ifdef USES_P082

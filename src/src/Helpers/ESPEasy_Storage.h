@@ -6,11 +6,13 @@
 
 #include "../Helpers/FS_Helper.h"
 
+#include "../DataStructs/ChecksumType.h"
 #include "../DataStructs/ProvisioningStruct.h"
 #include "../DataTypes/ESPEasyFileType.h"
 #include "../DataTypes/SettingsType.h"
 #include "../Globals/Plugins.h"
 #include "../Globals/CPlugins.h"
+
 
 /********************************************************************************************\
    file system error handling
@@ -32,16 +34,23 @@ String appendToFile(const String& fname, const uint8_t *data, unsigned int size)
 bool fileExists(const __FlashStringHelper * fname);
 bool fileExists(const String& fname);
 
-fs::File tryOpenFile(const String& fname, const String& mode);
+enum class FileDestination_e : uint8_t {
+  ANY   = 0,
+  FLASH = 1,
+  SD    = 2,
+};
 
-bool tryRenameFile(const String& fname_old, const String& fname_new);
+fs::File tryOpenFile(const String& fname, const String& mode, FileDestination_e destination = FileDestination_e::ANY);
 
-bool tryDeleteFile(const String& fname);
+bool tryRenameFile(const String& fname_old, const String& fname_new, FileDestination_e destination = FileDestination_e::ANY);
+
+bool tryDeleteFile(const String& fname, FileDestination_e destination = FileDestination_e::ANY);
 
 /********************************************************************************************\
    Fix stuff to clear out differences between releases
+   Return true when settings were changed/patched
  \*********************************************************************************************/
-String BuildFixes();
+bool BuildFixes();
 
 /********************************************************************************************\
    Mount FS and check config.dat
@@ -53,20 +62,51 @@ bool FS_format();
 #ifdef ESP32
 
 int  getPartionCount(uint8_t pType, uint8_t pSubType = 0xFF);
+String patch_fname(const String& fname);
 
 #endif
+#ifdef ESP8266
+#define patch_fname(F) (F)
+#endif
+
+/********************************************************************************************\
+   Low level clear RFcal and SDK WiFi parameters.
+ \*********************************************************************************************/
+ #ifdef ESP8266
+bool clearRFcalPartition();
+
+bool clearWiFiSDKpartition();
+
+#endif
+
 
 /********************************************************************************************\
    Garbage collection
  \*********************************************************************************************/
 bool GarbageCollection();
 
+
+// Macros needed for template class types, like SettingsStruct
+#define COMPUTE_STRUCT_CHECKSUM_UPDATE(STRUCT,OBJECT) \
+   ChecksumType::computeChecksum(OBJECT.md5,\
+                   reinterpret_cast<uint8_t *>(&OBJECT),\
+                   sizeof(STRUCT),\
+                   offsetof(STRUCT, md5),\
+                   true)
+
+#define COMPUTE_STRUCT_CHECKSUM(STRUCT,OBJECT) \
+   ChecksumType::computeChecksum(OBJECT.md5,\
+                   reinterpret_cast<uint8_t *>(&OBJECT),\
+                   sizeof(STRUCT),\
+                   offsetof(STRUCT, md5),\
+                   false)
+
 /********************************************************************************************\
    Save settings to file system
  \*********************************************************************************************/
-String SaveSettings();
+String SaveSettings(bool forFactoryReset = false);
 
-String SaveSecuritySettings();
+String SaveSecuritySettings(bool forFactoryReset = false);
 
 void afterloadSettings();
 
@@ -126,6 +166,14 @@ String SaveTaskSettings(taskIndex_t TaskIndex);
    Load Task settings from file system
  \*********************************************************************************************/
 String LoadTaskSettings(taskIndex_t TaskIndex);
+
+/********************************************************************************************\
+   Load/Save CDN custom setting from file system
+ \*********************************************************************************************/
+#if FEATURE_ALTERNATIVE_CDN_URL
+String get_CDN_url_custom();
+void set_CDN_url_custom(const String &url);
+#endif // if FEATURE_ALTERNATIVE_CDN_URL
 
 /********************************************************************************************\
    Save Custom Task settings to file system
@@ -276,10 +324,13 @@ size_t SpiffsFreeSpace();
 
 bool SpiffsFull();
 
+#if FEATURE_RTC_CACHE_STORAGE
 /********************************************************************************************\
    Handling cached data
  \*********************************************************************************************/
 String createCacheFilename(unsigned int count);
+
+bool isCacheFile(const String& fname);
 
 // Match string with an integer between '_' and ".bin"
 int getCacheFileCountFromFilename(const String& fname);
@@ -287,6 +338,7 @@ int getCacheFileCountFromFilename(const String& fname);
 // Look into the filesystem to see if there are any cache files present on the filesystem
 // Return true if any found.
 bool getCacheFileCounters(uint16_t& lowest, uint16_t& highest, size_t& filesizeHighest);
+#endif
 
 /********************************************************************************************\
    Get partition table information

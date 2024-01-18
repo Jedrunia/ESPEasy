@@ -4,6 +4,10 @@
 
 #include "../Globals/ESPEasyWiFiEvent.h"
 
+#ifdef ESP8266
+#include <ESP8266WiFi.h>
+#endif
+
 const __FlashStringHelper * WiFi_encryptionType(uint8_t encryptionType) {
 switch (encryptionType) {
   #ifdef ESP32
@@ -53,6 +57,11 @@ const __FlashStringHelper * SDKwifiStatusToString(uint8_t sdk_wifistatus)
 const __FlashStringHelper * ArduinoWifiStatusToFlashString(uint8_t arduino_corelib_wifistatus) {
   switch (arduino_corelib_wifistatus) {
     case WL_NO_SHIELD:       return F("WL_NO_SHIELD");
+#ifdef ESP32
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 2)
+    case WL_STOPPED:         return F("WL_STOPPED");
+#endif
+#endif
     case WL_IDLE_STATUS:     return F("WL_IDLE_STATUS");
     case WL_NO_SSID_AVAIL:   return F("WL_NO_SSID_AVAIL");
     case WL_SCAN_COMPLETED:  return F("WL_SCAN_COMPLETED");
@@ -105,7 +114,7 @@ const __FlashStringHelper * getLastDisconnectReason(WiFiDisconnectReason reason)
     case WIFI_DISCONNECT_REASON_NO_AP_FOUND:                return F("No AP found");              
     case WIFI_DISCONNECT_REASON_AUTH_FAIL:                  return F("Auth fail");                
     case WIFI_DISCONNECT_REASON_ASSOC_FAIL:                 return F("Assoc fail");               
-    case WIFI_DISCONNECT_REASON_HANDSHAKE_TIMEOUT:          return F("Handshake timeout");        
+    case WIFI_DISCONNECT_REASON_HANDSHAKE_TIMEOUT:          return F("Handshake timeout");
     default:  return F("Unknown");
   }
 }

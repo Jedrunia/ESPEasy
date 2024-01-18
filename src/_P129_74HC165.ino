@@ -7,6 +7,7 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2023-01-04 tonhuisman: Use DIRECT_pin GPIO functions for faster GPIO handling (mostly on ESP32), string optimization
  * 2022-08-05 tonhuisman: Fix issue with reading 8th bit of each byte (found during HW testing)
  *                        Reduce number of Values to match the selected number of chips/4. Small UI improvements.
  *                        Enable pin is no longer required, as it is not available or required on some boards.
@@ -42,14 +43,10 @@
 
 // TODO tonhuisman: ? Move to StringConverter ? though it is a bit specific, can also be used by P126
 String P129_ul2stringFixed(uint32_t value, uint8_t base) {
-  uint64_t val = static_cast<uint64_t>(value);
+  // Set bit just left of 32 bits so we will see the leading zeroes
+  const uint64_t val = static_cast<uint64_t>(value) | 0x100000000ull;
 
-  val &= 0x0ffffffff;     // Keep 32 bits
-  val |= 0x100000000;     // Set bit just left of 32 bits so we will see the leading zeroes
-  String valStr = ull2String(val, base);
-
-  valStr.remove(0, 1);    // Delete leading 1 we added
-
+  String valStr = ull2String(val, base).substring(1); // Delete leading 1 we added
   if (base == HEX) {
     valStr.toUpperCase(); // uppercase hex for readability
   }
@@ -172,10 +169,7 @@ boolean Plugin_129(uint8_t function, struct EventStruct *event, String& string)
                         chipOption,
                         P129_CONFIG_CHIP_COUNT,
                         true);
-
-        String unit = F("Daisychained 1..");
-        unit += P129_MAX_CHIP_COUNT;
-        addUnit(unit);
+        addUnit(concat(F("Daisychained 1.."), P129_MAX_CHIP_COUNT));
         # ifndef LIMIT_BUILD_SIZE
         addFormNote(F("Changing the number of chips will reload the page and update the Event configuration."));
         # endif // ifndef LIMIT_BUILD_SIZE
@@ -207,16 +201,16 @@ boolean Plugin_129(uint8_t function, struct EventStruct *event, String& string)
       {
         addRowLabel(F("Enable change-event for"));
         html_table(EMPTY_STRING); // Sub-table
-        html_table_header(F("Chip #&nbsp;"));
-        html_table_header(F("Port:"));
-        html_table_header(F("D7"));
-        html_table_header(F("D6"));
-        html_table_header(F("D5"));
-        html_table_header(F("D4"));
-        html_table_header(F("D3"));
-        html_table_header(F("D2"));
-        html_table_header(F("D1"));
-        html_table_header(F("D0"));
+        html_table_header(F("Chip #&nbsp;"), 70);
+        html_table_header(F("Port:"),        70);
+        html_table_header(F("D7"),           30);
+        html_table_header(F("D6"),           30);
+        html_table_header(F("D5"),           30);
+        html_table_header(F("D4"),           30);
+        html_table_header(F("D3"),           30);
+        html_table_header(F("D2"),           30);
+        html_table_header(F("D1"),           30);
+        html_table_header(F("D0"),           30);
 
         uint64_t bits = 0;
         uint8_t  off  = 0;
@@ -244,12 +238,11 @@ boolean Plugin_129(uint8_t function, struct EventStruct *event, String& string)
           for (uint8_t j = 0; j < 8; j++) {
             html_TD();
             # if FEATURE_TOOLTIPS
-            String toolTip = F("Chip ");
-            toolTip += (i + 1);
-            toolTip += F(" port D");
-            toolTip += (7 - j);
-            toolTip += F(", pin ");
-            toolTip += i * 8 + (8 - j);
+            const String toolTip = strformat(
+              F("Chip %d port D %d, pin %d"), 
+              (i + 1), 
+              (7 - j), 
+              i * 8 + (8 - j));
             # endif // if FEATURE_TOOLTIPS
             addCheckBox(getPluginCustomArgName((i * 8 + (7 - j)) + 1), bitRead(bits, off * 8 + (7 - j)) == 1
                         # if FEATURE_TOOLTIPS
@@ -296,7 +289,7 @@ boolean Plugin_129(uint8_t function, struct EventStruct *event, String& string)
         }
 
         for (uint8_t j = 0; j < 8; j++) {
-          bitWrite(bits, static_cast<uint64_t>(off * 8 + (7 - j)), isFormItemChecked(getPluginCustomArgName((i * 8 + (7 - j)) + 1)));
+          bitWriteULL(bits, static_cast<uint64_t>(off * 8 + (7 - j)), isFormItemChecked(getPluginCustomArgName((i * 8 + (7 - j)) + 1))); // -V629
         }
         PCONFIG_ULONG(i / 4) = bits;
 

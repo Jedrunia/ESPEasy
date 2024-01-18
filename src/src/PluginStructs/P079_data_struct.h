@@ -9,12 +9,6 @@
 # define PRODUCT_ID_I2C_LOLIN 0x02
 
 
-# if (ARDUINO >= 100)
- #  include "Arduino.h"
-# else // if (ARDUINO >= 100)
- #  include "WProgram.h"
-# endif  // if (ARDUINO >= 100)
-
 # include "Wire.h"
 
 # define P079_MOTOR_A     0
@@ -78,6 +72,9 @@ public:
              uint8_t  motor,
              uint32_t freq,
              uint8_t  STBY_IO);
+  WemosMotor() = delete;
+
+  void init();
   void setfreq(uint32_t freq);
   void setmotor(uint8_t dir,
                 float   pwm_val);
@@ -85,10 +82,11 @@ public:
 
 private:
 
-  uint8_t _address;
+  const uint8_t _address;
   uint8_t _motor;
-  bool _use_STBY_IO = false;
-  uint8_t _STBY_IO  = 0;
+  const uint32_t _freq;
+  const bool _use_STBY_IO = false;
+  const uint8_t _STBY_IO  = 0;
 };
 
 
@@ -96,6 +94,7 @@ class LOLIN_I2C_MOTOR {
 public:
 
   LOLIN_I2C_MOTOR(unsigned char address);
+  LOLIN_I2C_MOTOR() = delete;
   unsigned char reset(void);
   unsigned char getInfo(void);
   unsigned char changeStatus(unsigned char ch,

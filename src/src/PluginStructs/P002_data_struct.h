@@ -3,16 +3,21 @@
 
 #include "../../_Plugin_Helper.h"
 
+#include "../Helpers/OversamplingHelper.h"
+
 #ifdef USES_P002
 
-# include "../Helpers/Hardware.h"
 # include <vector>
 
 # ifdef ESP32
-
 // Needed to get ADC Vref
+#if ESP_IDF_VERSION_MAJOR >= 5
+  #include <esp_adc/adc_oneshot.h>
+
+#else
   #  include <esp_adc_cal.h>
   #  include <driver/adc.h>
+#endif
 # endif // ifdef ESP32
 
 
@@ -51,7 +56,11 @@
 # define P002_ADC_0db              (ADC_ATTEN_DB_0  + 10)
 # define P002_ADC_2_5db            (ADC_ATTEN_DB_2_5 + 10)
 # define P002_ADC_6db              (ADC_ATTEN_DB_6 + 10)
+#if ESP_IDF_VERSION_MAJOR >= 5
+# define P002_ADC_11db             (ADC_ATTEN_DB_12 + 10)
+#else
 # define P002_ADC_11db             (ADC_ATTEN_DB_11 + 10)
+#endif
 
 
 struct P002_ADC_Value_pair {
@@ -93,7 +102,10 @@ struct P002_binningRange {
 };
 
 struct P002_data_struct : public PluginTaskData_base {
-  P002_data_struct(struct EventStruct *event);
+  P002_data_struct() = default;
+  virtual ~P002_data_struct() = default;
+
+  void init(struct EventStruct *event);
 
 private:
 
@@ -162,6 +174,8 @@ public:
 
   void          reset();
 
+  uint32_t getOversamplingCount() const;
+
 private:
 
   void resetOversampling();
@@ -202,10 +216,6 @@ public:
 # ifdef ESP32
   static bool  useFactoryCalibration(struct EventStruct *event);
 
-  static float applyFactoryCalibration(float       raw_value,
-                                       adc_atten_t attenuation);
-
-
 # endif // ifdef ESP32
 
 private:
@@ -214,21 +224,23 @@ private:
   float        applyMultiPointInterpolation(float float_value, bool force = false) const;
 # endif // ifndef LIMIT_BUILD_SIZE
 
-  static float mapADCtoFloat(float float_value,
-                             float adc1,
-                             float adc2,
-                             float out1,
-                             float out2);
+
+  // Map the input "point" values to the nearest int.
+  static void setTwoPointCalibration(struct EventStruct *event,
+                                     float adc1,
+                                     float adc2,
+                                     float out1,
+                                     float out2);
 
 public:
 
-  uint16_t OversamplingCount = 0;
+  bool plugin_set_config(struct EventStruct *event, String& string);
+
 
 private:
+ 
 
-  int32_t OversamplingValue  = 0;
-  int16_t OversamplingMinVal = MAX_ADC_VALUE;
-  int16_t OversamplingMaxVal = -MAX_ADC_VALUE;
+  OversamplingHelper<int32_t> OverSampling;
 
   int   _calib_adc1 = 0;
   int   _calib_adc2 = 0;
@@ -255,8 +267,14 @@ private:
 # endif // ifndef LIMIT_BUILD_SIZE
 # ifdef ESP32
   bool        _useFactoryCalibration = false;
+
+#if ESP_IDF_VERSION_MAJOR >= 5
+  adc_atten_t _attenuation           = ADC_ATTEN_DB_12;
+#else
   adc_atten_t _attenuation           = ADC_ATTEN_DB_11;
+#endif
 # endif // ifdef ESP32
+
 };
 
 

@@ -3,8 +3,6 @@
 
 #include "../../ESPEasy_common.h"
 
-#include <Arduino.h>
-
 #include "../Globals/Plugins.h"
 
 /********************************************************************************************\
@@ -40,7 +38,8 @@ void transformValue(
 
 // Find the first (enabled) task with given name
 // Return INVALID_TASK_INDEX when not found, else return taskIndex
-taskIndex_t findTaskIndexByName(const String& deviceName, bool allowDisabled = false);
+// deviceName is deepcopy to only store lower case version in cache.
+taskIndex_t findTaskIndexByName(String deviceName, bool allowDisabled = false);
 
 // Find the first device value index of a taskIndex.
 // Return VARS_PER_TASK if none found.
@@ -77,7 +76,8 @@ taskIndex_t parseCommandArgumentTaskIndex(const String& string,
    Get int from command argument (argc = 0 => command)
  \*********************************************************************************************/
 int parseCommandArgumentInt(const String& string,
-                            unsigned int  argc);
+                            unsigned int  argc,
+                            int errorValue = 0);
 
 /********************************************************************************************\
    Parse a command string to event struct

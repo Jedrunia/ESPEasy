@@ -7,7 +7,7 @@
 # include <Adafruit_TCS34725.h>
 
 typedef struct {
-  float matrix[3][3];
+  float matrix[3][3]={};
 } tcsTransformationSettings_t;
 
 struct P050_data_struct : public PluginTaskData_base {
@@ -15,12 +15,16 @@ struct P050_data_struct : public PluginTaskData_base {
 public:
 
   P050_data_struct(uint16_t integrationSetting, uint16_t gainSetting);
+  P050_data_struct() = delete;
+  virtual ~P050_data_struct() = default;
 
   bool loadSettings(taskIndex_t taskIndex);
   bool saveSettings(taskIndex_t taskIndex);
   void resetTransformation();
   void applyTransformation(uint16_t r, uint16_t g, uint16_t b, float *rc, float *gc, float *bc);
   void applyTransformation(float nr, float ng, float nb, float *rc, float *gc, float *bc);
+
+  static String generate_cal_id(int i, int j);
 
   Adafruit_TCS34725           tcs;
 

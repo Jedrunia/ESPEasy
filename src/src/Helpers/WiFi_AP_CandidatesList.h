@@ -50,7 +50,9 @@ struct WiFi_AP_CandidatesList {
 
   WiFi_AP_Candidate        getBestCandidate() const;
 
-  bool                     hasKnownCredentials();
+  bool                     hasCandidateCredentials();
+
+  bool                     hasCandidates() const;
 
   // Make sure the current connection (from RTC) is set as first next candidate.
   // This will force a reconnect to the current AP if connection is lost.
@@ -82,9 +84,17 @@ private:
   void purge_unusable();
 
   // Load SSID and pass/key from the settings.
-  bool get_SSID_key(uint8_t    index,
+  static bool get_SSID_key(uint8_t    index,
                     String& ssid,
-                    String& key) const;
+                    String& key);
+
+public:
+
+  static bool get_SSID(uint8_t index, String& ssid);
+
+  static String get_key(uint8_t index);
+
+private:
 
   std::list<WiFi_AP_Candidate> candidates;
 

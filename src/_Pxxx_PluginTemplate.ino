@@ -1,16 +1,22 @@
 /* This file is a template for Plugins */
 
-/* References:
-   https://www.letscontrolit.com/wiki/index.php/ESPEasyDevelopment
-   https://www.letscontrolit.com/wiki/index.php/ESPEasyDevelopmentGuidelines
+/* 
+   This guide shows the setup of VSCode and some required and a few optional extensions for development on ESPEasy:
+   https://espeasy.readthedocs.io/en/latest/Participate/PlatformIO.html
+   
+   We even have a starter guide for development on ESPEasy with all steps from beginning to end including writing the documentation:
+   https://espeasy.readthedocs.io/en/latest/Participate/PlatformIO.html#starter-guide-for-local-development-on-espeasy
+
+  Other References:
+   https://www.letscontrolit.com/wiki/index.php/ESPEasyDevelopment (No longer updated)
+   https://www.letscontrolit.com/wiki/index.php/ESPEasyDevelopmentGuidelines (No longer updated)
    https://github.com/letscontrolit/ESPEasyPluginPlayground
-   https://diyprojects.io/esp-easy-develop-plugins/
 
    A Plugin should have an ID.
    The official plugin list is available here: https://www.letscontrolit.com/wiki/index.php/Official_plugin_list
    The plugin playground is available here: https://github.com/letscontrolit/ESPEasyPluginPlayground
 
-   Use the next available ID. The maximum number of Plugins is defined in ESPEasy-Globals.h (PLUGIN_MAX)
+   Request a new PluginID via this Github issue: https://github.com/letscontrolit/ESPEasy/issues/3839
 
    The Plugin filename should be of the form "_Pxxx_name.ino", where:
     xxx is the ID
@@ -28,12 +34,12 @@
      - set plugin status to DEVELOPMENT and distribute to other users for testing
      - after sufficient usage and possible code correction, set plugin status to TESTING and perform testing with more users
      - finally, plugin will be accepted in project, then the TESTING tag can be removed.
-   - along with the plugin source code, prepare a wiki page containing:
+   - along with the plugin source code, prepare the Read The Docs documentation (included in the repository) containing:
      - instructions on how to make the necessary configuration
      - instructions on commands (if any)
      - examples: plugin usage, command usage,...
    - when a plugin is removed (deleted), make sure you free any memory it uses. Use PLUGIN_EXIT for that
-   - if your plugin creates log entries, prefix your entries with your plugin id: "[Pxxx] my plugin did this"
+   - if your plugin creates log entries, prefix your entries with your plugin id: "Pxxx : my plugin did this"
    - if your plugin takes input from user and/or accepts/sends http commands, make sure you properly handle non-alphanumeric characters
       correctly
    - After ESP boots, all devices can send data instantly. If your plugin is for a sensor which sends data, ensure it doesn't need a delay
@@ -186,12 +192,48 @@ boolean Plugin_xxx(uint8_t function, struct EventStruct *event, String& string)
       // The position in the config parameters used in this example is PCONFIG(Pxxx_OUTPUT_TYPE_INDEX)
       // Must match the one used in case PLUGIN_GET_DEVICEVALUECOUNT  (best to use a define for it)
       // IDX is used here to mark the PCONFIG position used to store the Device VType.
-      // see P026_Sysinfo.ino for more examples.
+      // see _P026_Sysinfo.ino for more examples.
       event->idx        = Pxxx_OUTPUT_TYPE_INDEX;
       event->sensorType = static_cast<Sensor_VType>(PCONFIG(event->idx));
       success           = true;
       break;
     }
+
+    // START: For I2C plugins only:
+
+    // When multiple I2C addresses can be used for the hardware:
+    // case PLUGIN_I2C_HAS_ADDRESS:
+    // case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
+    // {
+    //   const uint8_t i2cAddressValues[] = { 0x40, 0x41, 0x42, 0x43 }; // A list of usable I2C addresses, length 4 must be adjusted below
+
+    //   if (function == PLUGIN_WEBFORM_SHOW_I2C_PARAMS) {
+    //     addFormSelectorI2C(F("i2c_addr"), 4, i2cAddressValues, PCONFIG(0));
+    //   } else {
+    //     success = intArrayContains(4, i2cAddressValues, event->Par1);
+    //   }
+    //   break;
+    // }
+
+    // When only 1 I2C address can be used
+    // case PLUGIN_I2C_HAS_ADDRESS:
+    // {
+    //   success = event->Par1 == 0x53;
+    //   break;
+    // }
+
+    // # if FEATURE_I2C_GET_ADDRESS
+    // case PLUGIN_I2C_GET_ADDRESS:
+    // {
+    //   // Called to show the configured I2C address on the Devices page
+    //
+    //   event->Par1 = 0x77; // or: = Pxxx_I2C_ADDR
+    //   success     = true;
+    //   break;
+    // }
+    // # endif // if FEATURE_I2C_GET_ADDRESS
+
+    // END: For I2C plugins only
 
     case PLUGIN_SET_DEFAULTS:
     {
@@ -220,11 +262,15 @@ boolean Plugin_xxx(uint8_t function, struct EventStruct *event, String& string)
 
       // For strings, always use the F() macro, which stores the string in flash, not in memory.
 
-      // String dropdown[5] = { F("option1"), F("option2"), F("option3"), F("option4")};
-      // addFormSelector(string, F("drop-down menu"), F("plugin_xxx_displtype"), 4, dropdown, nullptr, PCONFIG(0));
+      // const __FlashStringHelper dropdownList[] = { F("option1"), F("option2"), F("option3"), F("option4")};
+      // const int dropdownOptions[] = { 1, 2, 3, 4 };
+      // constexpr int dropdownCount = NR_ELEMENTS(dropdownOptions);
+      // addFormSelector(string, F("drop-down menu"), F("dsptype"), dropdownCount, dropdownList, dropdownOptions, PCONFIG(0));
 
-      // number selection (min-value - max-value)
-      addFormNumericBox(string, F("description"), F("plugin_xxx_description"), PCONFIG(1), min - value, max - value);
+      // number selection (min_value - max_value)
+      addFormNumericBox(string, F("description"), F("desc"), PCONFIG(1), min_value, max_value);
+
+      // If custom tasksettings need to be loaded and displayed, this is the place to add that
 
       // after the form has been loaded, set success and break
       success = true;
@@ -235,7 +281,9 @@ boolean Plugin_xxx(uint8_t function, struct EventStruct *event, String& string)
     {
       // this case defines the code to be executed when the form is submitted
       // the plugin settings should be saved to PCONFIG(x)
-      // ping configuration should be read from CONFIG_PIN1 and stored
+      // PCONFIG(0) = getFormItemInt(F("dsptype"));
+      // pin configuration will be read from CONFIG_PIN1 and stored
+      // If custom tasksettings need to be stored, then here is the place to add that
 
       // after the form has been saved successfuly, set success and break
       success = true;
@@ -271,21 +319,19 @@ boolean Plugin_xxx(uint8_t function, struct EventStruct *event, String& string)
         break;
       }
 
-      // FIXME TD-er: This one is not using parseString* function
       // parse string to extract the command
-      String tmpString = string;
-      int    argIndex  = tmpString.indexOf(',');
+      String tmpString = parseString(string, 1); // already converted to lowercase
 
-      if (argIndex) {
-        tmpString = tmpString.substring(0, argIndex);
-      }
-
-      String tmpStr = string;
-      int    comma1 = tmpStr.indexOf(',');
-
-      if (tmpString.equalsIgnoreCase(F("dothis"))) {
-        // do something
-        success = true; // set to true only if plugin has executed a command successfully
+      if (equals(tmpString, F("dothis"))) {
+        String subcmd = parseString(string, 2);
+        if (equals(subcmd, F("sub1"))) {
+          // do subcommand 1
+        } else if (equals(subcmd, F("sub2"))) {
+          // do something else
+        } else {
+          // do non-specific subcommand
+        }
+        success = true; // set to true **only** if plugin has executed a command/subcommand successfully
       }
 
       break;
@@ -293,7 +339,7 @@ boolean Plugin_xxx(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_EXIT:
     {
-      // perform cleanup tasks here. For example, free memory
+      // perform cleanup tasks here. For example, free memory, shut down/clear a display
 
       break;
     }

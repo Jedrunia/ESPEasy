@@ -7,6 +7,13 @@
 // #######################################################################################################
 
 // Changelog:
+// 2023-08-09, tonhuisman Update NeoPixelBus library to latest (2.7.6).
+//                        Keep reverted code for ESP8266 AND ESP32, so using deprecated NeoPixelBrightnessBus class,
+//                        with deprecation message disabled (unfortunately we'll have to keep dat updated manually)
+// 2023-07-20, tonhuisman Revert change to NeoWs2812xMethod, as this doesn't properly work on ESP8266 (yet)
+// 2023-05-13, tonhuisman Add P128_USES_BGR / BGR definitions and support (compile-time)
+//                        Use more global NeoWs2812xMethod, as the library uses best matching hardware features per CPU type
+// 2023-05-12, tonhuisman Update for latest NeoPixelBusFx changes (NeoPixelBusLg class, (S/G)etLuminance method)
 // 2022-07-20, tonhuisman Make FakeTV compile-time optional, disabled by default on ESP8266, enabled by default on ESP32
 //                        P128_ENABLE_FAKETV can be set to 0/1 in Custom.h
 // 2022-07-02, tonhuisman Introduce Max Brightness setting for protecting the hardware and power supply (and the eyes :-))
@@ -63,9 +70,9 @@
 
    nfx theatre color [backgroundcolor] [count] [speed]
 
-   nfx scan color [backgroundcolor] [speed]
+   nfx scan color [backgroundcolor] [speed] [startpixel] [endpixel]
 
-   nfx dualscan color [backgroundcolor] [speed]
+   nfx dualscan color [backgroundcolor] [speed] [startpixel] [endpixel]
 
    nfx twinkle color [backgroundcolor] [speed]
 
@@ -230,10 +237,7 @@ boolean Plugin_128(uint8_t function, struct EventStruct *event, String& string)
       }
 
       if (P128_CONFIG_MAX_BRIGHT == 0) { P128_CONFIG_MAX_BRIGHT = 255; } // Set to default for existing installations
-      initPluginTaskData(event->TaskIndex, new (std::nothrow) P128_data_struct(PIN(0), P128_CONFIG_LED_COUNT, P128_CONFIG_MAX_BRIGHT));
-      P128_data_struct *P128_data = static_cast<P128_data_struct *>(getPluginTaskData(event->TaskIndex));
-
-      success = nullptr != P128_data;
+      success = initPluginTaskData(event->TaskIndex, new (std::nothrow) P128_data_struct(PIN(0), P128_CONFIG_LED_COUNT, P128_CONFIG_MAX_BRIGHT));
       break;
     }
 

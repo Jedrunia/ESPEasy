@@ -3,8 +3,6 @@
 
 #include "../../ESPEasy_common.h"
 
-#include <Arduino.h>
-
 #include "../DataStructs/GpioFactorySettingsStruct.h"
 #include "../DataStructs/PinMode.h"
 #include "../DataTypes/DeviceModel.h"
@@ -13,29 +11,13 @@
 
 #include "../Globals/ResetFactoryDefaultPref.h"
 
-#ifdef ESP32
-# include <driver/adc.h>
+#include "../Helpers/Hardware_defines.h"
 
-// Needed to get ADC Vref
-# include <esp_adc_cal.h>
-# include <driver/adc.h>
-#endif // ifdef ESP32
+#if ESP_IDF_VERSION_MAJOR >= 5
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
 
-#ifdef ESP32
-# if CONFIG_IDF_TARGET_ESP32
-  #  define MAX_ADC_VALUE 4095
-# else // if CONFIG_IDF_TARGET_ESP32
-  #  define MAX_ADC_VALUE ((1 << SOC_ADC_MAX_BITWIDTH) - 1)
-# endif  // if CONFIG_IDF_TARGET_ESP32
-#endif  // ifdef ESP32
-#ifdef ESP8266
-  #if FEATURE_ADC_VCC
-  // Vcc in units of 1/1024 V
-  # define MAX_ADC_VALUE 4095
-  #else
-  # define MAX_ADC_VALUE 1023
-  #endif
-#endif // ifdef ESP8266
+#endif
 
 
 /********************************************************************************************\
@@ -43,33 +25,6 @@
  \*********************************************************************************************/
 void hardwareInit();
 
-void initI2C();
-
-void I2CSelectHighClockSpeed();
-void I2CSelectLowClockSpeed();
-void I2CSelect_Max100kHz_ClockSpeed();
-void I2CSelectClockSpeed(uint32_t clockFreq);
-void I2CForceResetBus_swap_pins(uint8_t address);
-void I2CBegin(int8_t   sda,
-              int8_t   scl,
-              uint32_t clockFreq);
-
-#if FEATURE_I2CMULTIPLEXER
-bool    isI2CMultiplexerEnabled();
-
-void    I2CMultiplexerSelectByTaskIndex(taskIndex_t taskIndex);
-void    I2CMultiplexerSelect(uint8_t i);
-
-void    I2CMultiplexerOff();
-
-void    SetI2CMultiplexer(uint8_t toWrite);
-
-uint8_t I2CMultiplexerMaxChannels();
-
-void    I2CMultiplexerReset();
-
-bool    I2CMultiplexerPortSelectedForTask(taskIndex_t taskIndex);
-#endif // if FEATURE_I2CMULTIPLEXER
 
 void    checkResetFactoryPin();
 
@@ -79,87 +34,37 @@ extern int lastADCvalue; // Keep track of last ADC value as it cannot be read wh
 int espeasy_analogRead(int pin);
 #endif // ifdef ESP8266
 
+float mapADCtoFloat(float float_value,
+                             float adc1,
+                             float adc2,
+                             float out1,
+                             float out2);
+
+
 #ifdef ESP32
 void                       initADC();
+float                      applyADCFactoryCalibration(
+    float raw_value, 
+    adc_atten_t attenuation);
 
 bool                       hasADC_factory_calibration();
 const __FlashStringHelper* getADC_factory_calibration_type();
 
+float getADC_factory_calibrated_min(adc_atten_t attenuation);
+float getADC_factory_calibrated_max(adc_atten_t attenuation);
+
 int                        getADC_num_for_gpio(int pin);
+int                        getADC_num_for_gpio(int pin, int& channel);
 
 int                        espeasy_analogRead(int  pin,
                                               bool readAsTouch = false);
 
-// ADC Factory calibration definition
-extern esp_adc_cal_characteristics_t adc_chars[ADC_ATTEN_MAX];
+int  getCPU_MaxFreqMHz();
+int  getCPU_MinFreqMHz();
+
 #endif // ifdef ESP32
 
 
-/********************************************************************************************\
-   Hardware information
- \*********************************************************************************************/
-uint32_t                   getFlashChipId();
-
-uint32_t                   getFlashRealSizeInBytes();
-
-uint32_t                   getFlashChipSpeed();
-
-#ifdef ESP32
-uint32_t                   getXtalFrequencyMHz();
-#endif // ifdef ESP32
-
-const __FlashStringHelper* getFlashChipMode();
-
-bool                       puyaSupport();
-
-uint8_t                    getFlashChipVendorId();
-
-bool                       flashChipVendorPuya();
-
-// Last 24 bit of MAC address as integer, to be used in rules.
-uint32_t                   getChipId();
-
-uint8_t                    getChipCores();
-
-const __FlashStringHelper* getChipModel();
-
-bool                       isESP8285();
-
-uint8_t                    getChipRevision();
-
-uint32_t                   getSketchSize();
-
-uint32_t                   getFreeSketchSpace();
-
-
-/********************************************************************************************\
-   PSRAM support
- \*********************************************************************************************/
-#ifdef ESP32
-
-// this function is a replacement for `psramFound()`.
-// `psramFound()` can return true even if no PSRAM is actually installed
-// This new version also checks `esp_spiram_is_initialized` to know if the PSRAM is initialized
-// Original Tasmota:
-// https://github.com/arendst/Tasmota/blob/1e6b78a957be538cf494f0e2dc49060d1cb0fe8b/tasmota/support_esp.ino#L470
-bool FoundPSRAM();
-
-// new function to check whether PSRAM is present and supported (i.e. required pacthes are present)
-bool UsePSRAM();
-
-/*
- * ESP32 v1 and v2 needs some special patches to use PSRAM.
- * Original function used from Tasmota:
- * https://github.com/arendst/Tasmota/blob/1e6b78a957be538cf494f0e2dc49060d1cb0fe8b/tasmota/support_esp.ino#L762
- *
- * If using ESP32 v1, please add: `-mfix-esp32-psram-cache-issue -lc-psram-workaround -lm-psram-workaround`
- *
- * This function returns true if the chip supports PSRAM natively (v3) or if the
- * patches are present.
- */
-bool CanUsePSRAM();
-
-#endif // ESP32
 
 /*********************************************************************************************\
 * High entropy hardware random generator
@@ -168,6 +73,10 @@ bool CanUsePSRAM();
 
 // Based on code from https://raw.githubusercontent.com/espressif/esp-idf/master/components/esp32/hw_random.c
 uint32_t HwRandom();
+
+long HwRandom(long howbig);
+
+long HwRandom(long howsmall, long howbig);
 
 
 /********************************************************************************************\
@@ -202,68 +111,6 @@ void addButtonRelayRule(uint8_t buttonNumber,
 
 void addPredefinedRules(const GpioFactorySettingsStruct& gpio_settings);
 
-// ********************************************************************************
-// Get info of a specific GPIO pin.
-// ********************************************************************************
-// return true when pin can be used.
-bool getGpioInfo(int   gpio,
-                 int & pinnr,
-                 bool& input,
-                 bool& output,
-                 bool& warning);
-
-bool getGpioPullResistor(int   gpio,
-                         bool& hasPullUp,
-                         bool& hasPullDown);
-
-bool validGpio(int gpio);
-
-
-#ifdef ESP32
-
-// Get ADC related info for a given GPIO pin
-// @param gpio_pin   GPIO pin number
-// @param adc        Number of ADC unit (0 == Hall effect)
-// @param ch         Channel number on ADC unit
-// @param t          index of touch pad ID
-bool getADC_gpio_info(int  gpio_pin,
-                      int& adc,
-                      int& ch,
-                      int& t);
-int touchPinToGpio(int touch_pin);
-
-#endif // ifdef ESP32
-
-// ********************************************************************************
-// Manage PWM state of GPIO pins.
-// ********************************************************************************
-void initAnalogWrite();
-#if defined(ESP32)
-extern int8_t   ledChannelPin[16];
-extern uint32_t ledChannelFreq[16];
-
-int8_t   attachLedChannel(int      pin,
-                          uint32_t frequency = 0);
-void     detachLedChannel(int pin);
-uint32_t analogWriteESP32(int      pin,
-                          int      value,
-                          uint32_t frequency = 0);
-#endif // if defined(ESP32)
-
-// Duty cycle 0..100%
-bool set_Gpio_PWM_pct(int      gpio,
-                      float    dutyCycle_f,
-                      uint32_t frequency = 0);
-
-bool set_Gpio_PWM(int      gpio,
-                  uint32_t dutyCycle,
-                  uint32_t frequency = 0);
-bool set_Gpio_PWM(int       gpio,
-                  uint32_t  dutyCycle,
-                  uint32_t  fadeDuration_ms,
-                  uint32_t& frequency,
-                  uint32_t& key);
-
 
 // ********************************************************************************
 // change of device: cleanup old device and reset default settings
@@ -278,8 +125,6 @@ void setBasicTaskValues(taskIndex_t   taskIndex,
                         unsigned long taskdevicetimer,
                         bool          enabled,
                         const String& name,
-                        int           pin1,
-                        int           pin2,
-                        int           pin3);
+                        const int     pins[3]);
 
 #endif // HELPERS_HARDWARE_H

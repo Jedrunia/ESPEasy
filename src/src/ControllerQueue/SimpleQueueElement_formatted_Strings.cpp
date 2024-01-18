@@ -8,64 +8,53 @@
 
 SimpleQueueElement_formatted_Strings::SimpleQueueElement_formatted_Strings(struct EventStruct *event) :
   idx(event->idx),
-  TaskIndex(event->TaskIndex),
-  controller_idx(event->ControllerIndex),
   sensorType(event->sensorType),
-  valuesSent(0) 
+  valuesSent(0)
 {
-  #ifdef USE_SECOND_HEAP
-  HeapSelectIram ephemeral;
-  #endif
+  _controller_idx = event->ControllerIndex;
+  _taskIndex = event->TaskIndex;
 
-  valueCount = getValueCountForTask(TaskIndex);
+  valueCount = getValueCountForTask(_taskIndex);
 
   for (uint8_t i = 0; i < valueCount; ++i) {
-    txt[i] = formatUserVarNoCheck(event, i);
+    move_special(txt[i], formatUserVarNoCheck(event, i));
   }
 }
 
 SimpleQueueElement_formatted_Strings::SimpleQueueElement_formatted_Strings(const struct EventStruct *event, uint8_t value_count) :
   idx(event->idx),
-  TaskIndex(event->TaskIndex),
-  controller_idx(event->ControllerIndex),
   sensorType(event->sensorType),
   valuesSent(0),
-  valueCount(value_count) {}
+  valueCount(value_count) {
+  _controller_idx = event->ControllerIndex;
+  _taskIndex      = event->TaskIndex;
+}
 
 SimpleQueueElement_formatted_Strings::SimpleQueueElement_formatted_Strings(SimpleQueueElement_formatted_Strings&& rval)
-  : idx(rval.idx), _timestamp(rval._timestamp),  TaskIndex(rval.TaskIndex),
-  controller_idx(rval.controller_idx), sensorType(rval.sensorType),
+  : idx(rval.idx),
+  sensorType(rval.sensorType),
   valuesSent(rval.valuesSent), valueCount(rval.valueCount)
 {
-  #ifdef USE_SECOND_HEAP
-  HeapSelectIram ephemeral;
-  #endif
+  _timestamp      = rval._timestamp;
+  _controller_idx = rval._controller_idx;
+  _taskIndex      = rval._taskIndex;
 
   for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
-    txt[i] = std::move(rval.txt[i]);
+    move_special(txt[i], std::move(rval.txt[i]));
   }
 }
 
 SimpleQueueElement_formatted_Strings& SimpleQueueElement_formatted_Strings::operator=(SimpleQueueElement_formatted_Strings&& rval) {
-  idx            = rval.idx;
-  _timestamp     = rval._timestamp;
-  TaskIndex      = rval.TaskIndex;
-  controller_idx = rval.controller_idx;
-  sensorType     = rval.sensorType;
-  valuesSent     = rval.valuesSent;
-  valueCount     = rval.valueCount;
+  idx             = rval.idx;
+  _timestamp      = rval._timestamp;
+  _taskIndex      = rval._taskIndex;
+  _controller_idx = rval._controller_idx;
+  sensorType      = rval.sensorType;
+  valuesSent      = rval.valuesSent;
+  valueCount      = rval.valueCount;
 
   for (size_t i = 0; i < VARS_PER_TASK; ++i) {
-    #ifdef USE_SECOND_HEAP
-    HeapSelectIram ephemeral;
-    if (rval.txt[i].length() && !mmu_is_iram(&(rval.txt[i][0]))) {
-      txt[i] = rval.txt[i];
-    } else {
-      txt[i] = std::move(rval.txt[i]);
-    }
-    #else
-    txt[i] = std::move(rval.txt[i]);
-    #endif // ifdef USE_SECOND_HEAP
+    move_special(txt[i], std::move(rval.txt[i]));
   }
   return *this;
 }
@@ -84,17 +73,19 @@ size_t SimpleQueueElement_formatted_Strings::getSize() const {
   return total;
 }
 
-bool SimpleQueueElement_formatted_Strings::isDuplicate(const SimpleQueueElement_formatted_Strings& rval) const {
-  if ((rval.controller_idx != controller_idx) ||
-      (rval.TaskIndex != TaskIndex) ||
-      (rval.sensorType != sensorType) ||
-      (rval.valueCount != valueCount) ||
-      (rval.idx != idx)) {
+bool SimpleQueueElement_formatted_Strings::isDuplicate(const Queue_element_base& rval) const {
+  const SimpleQueueElement_formatted_Strings& oth = static_cast<const SimpleQueueElement_formatted_Strings&>(rval);
+
+  if ((oth._controller_idx != _controller_idx) ||
+      (oth._taskIndex != _taskIndex) ||
+      (oth.sensorType != sensorType) ||
+      (oth.valueCount != valueCount) ||
+      (oth.idx != idx)) {
     return false;
   }
 
   for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
-    if (rval.txt[i] != txt[i]) {
+    if (oth.txt[i] != txt[i]) {
       return false;
     }
   }

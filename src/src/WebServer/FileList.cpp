@@ -24,6 +24,8 @@
 #endif // if FEATURE_SD
 
 
+#define FILES_PER_PAGE   50
+
 #ifdef WEBSERVER_NEW_UI
 
 // ********************************************************************************
@@ -50,8 +52,7 @@ void handle_filelist_json() {
     # endif // if defined(ESP8266)
   }
 
-  const int pageSize = 25;
-  int startIdx       = 0;
+  int32_t startIdx       = 0;
 
   String fstart = webArg(F("start"));
 
@@ -59,7 +60,7 @@ void handle_filelist_json() {
   {
     validIntFromString(fstart, startIdx);
   }
-  int endIdx = startIdx + pageSize - 1;
+  int endIdx = startIdx + FILES_PER_PAGE - 1;
 
   addHtml('[', '{');
   bool firstentry = true;
@@ -147,33 +148,29 @@ void handle_filelist() {
   TXBuffer.startStream();
   sendHeadandTail_stdtemplate(_HEAD);
 
-  String fdelete = webArg(F("delete"));
-
-  if (tryDeleteFile(fdelete))
+  if (tryDeleteFile(webArg(F("delete"))))
   {
     checkRuleSets();
   }
   # ifdef USES_C016
 
   if (hasArg(F("delcache"))) {
-    while (C016_deleteOldestCacheBlock()) {
-      delay(1);
-    }
+    addLog(LOG_LEVEL_INFO, F("RTC  : delcache"));
+    C016_deleteAllCacheBlocks();
 
     while (GarbageCollection()) {
       delay(1);
     }
   }
   # endif // ifdef USES_C016
-  const int pageSize = 25;
-  int startIdx       = 0;
-  String fstart      = webArg(F("start"));
+  int32_t startIdx       = 0;
+  const String fstart    = webArg(F("start"));
 
   if (fstart.length() > 0)
   {
     validIntFromString(fstart, startIdx);
   }
-  int endIdx = startIdx + pageSize - 1;
+  const int endIdx = startIdx + FILES_PER_PAGE - 1;
   html_table_class_multirow();
   html_table_header(F(""),        50);
   html_table_header(F("Filename"));
@@ -181,7 +178,9 @@ void handle_filelist() {
   int count = -1;
 
   bool moreFilesPresent  = false;
+#if FEATURE_RTC_CACHE_STORAGE
   bool cacheFilesPresent = false;
+#endif
 
 # if defined(ESP8266)
 
@@ -199,11 +198,12 @@ void handle_filelist() {
       if (f) {
         filesize = f.size();
       }
-
+#if FEATURE_RTC_CACHE_STORAGE
       if (!cacheFilesPresent && (getCacheFileCountFromFilename(dir.fileName()) != -1))
       {
         cacheFilesPresent = true;
       }
+#endif
       handle_filelist_add_file(dir.fileName(), filesize, startIdx);
     }
   }
@@ -220,10 +220,12 @@ void handle_filelist() {
 
       if (count >= startIdx)
       {
+#if FEATURE_RTC_CACHE_STORAGE
         if (!cacheFilesPresent && (getCacheFileCountFromFilename(file.name()) != -1))
         {
           cacheFilesPresent = true;
         }
+#endif
         handle_filelist_add_file(file.name(), file.size(), startIdx);
       }
     }
@@ -236,14 +238,18 @@ void handle_filelist() {
 
   if (startIdx > 0)
   {
-    start_prev = startIdx < pageSize ? 0 : startIdx - pageSize;
+    start_prev = startIdx < FILES_PER_PAGE ? 0 : startIdx - FILES_PER_PAGE;
   }
   int start_next = -1;
 
   if ((count >= endIdx) && moreFilesPresent) {
     start_next = endIdx + 1;
   }
+#if FEATURE_RTC_CACHE_STORAGE
   handle_filelist_buttons(start_prev, start_next, cacheFilesPresent);
+#else
+  handle_filelist_buttons(start_prev, start_next, false);
+#endif
 }
 
 void handle_filelist_add_file(const String& filename, int filesize, int startIdx) {
@@ -296,11 +302,12 @@ void handle_filelist_buttons(int start_prev, int start_next, bool cacheFilesPres
     addHtmlInt(start_next);
     addHtml(F("'>Next</a>"));
   }
-
+#if FEATURE_RTC_CACHE_STORAGE
   if (cacheFilesPresent) {
     html_add_button_prefix(F("red"), true);
-    addHtml(F("filelist?delcache'>Delete Cache Files</a>"));
+    addHtml(F("filelist?delcache=1'>Delete Cache Files</a>"));
   }
+#endif
   addHtml(F("<BR><BR>"));
   sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
@@ -332,17 +339,17 @@ void handle_SDfilelist() {
   for (uint8_t i = 0; i < web_server.args(); i++) {
     // FIXME TD-er: This only checks for arguments in the URL, not in POST args
     // It also takes only the last matching argument.
-    if (web_server.argName(i).equals(F("delete")))
+    if (equals(web_server.argName(i), F("delete")))
     {
       fdelete = webArg(i);
     }
 
-    if (web_server.argName(i).equals(F("deletedir")))
+    if (equals(web_server.argName(i), F("deletedir")))
     {
       ddelete = webArg(i);
     }
 
-    if (web_server.argName(i).equals(F("chgto")))
+    if (equals(web_server.argName(i), F("chgto")))
     {
       change_to_dir = webArg(i);
     }
@@ -386,12 +393,11 @@ void handle_SDfilelist() {
   }
 
 
-  addFormSubHeader(String(F("SD Card: ")) + current_dir);
   html_BR();
   html_table_class_multirow();
   html_table_header(F(""), 50);
-  html_table_header(F("Name"));
-  html_table_header(F("Size"));
+  html_table_header(concat(F("SD Card: "), current_dir));
+  html_table_header(F("Size"), 80);
   html_TR_TD();
   {
     addHtml(F("<TD><a href=\"SDfilelist?chgto="));
@@ -405,12 +411,9 @@ void handle_SDfilelist() {
     // size_t entrynameLength = strlen(entry.name());
     if (entry.isDirectory())
     {
-      char SDcardChildDir[80];
-
       // take a look in the directory for entries
       String child_dir = current_dir + entry.name();
-      child_dir.toCharArray(SDcardChildDir, child_dir.length() + 1);
-      fs::File child         = SD.open(SDcardChildDir);
+      fs::File child         = SD.open(child_dir.c_str());
       fs::File dir_has_entry = child.openNextFile();
 
       // when the directory is empty, display the button to delete them
@@ -418,8 +421,10 @@ void handle_SDfilelist() {
       {
         addHtml(F("<a class='button link' onclick=\"return confirm('Delete this directory?')\" href=\"SDfilelist?deletedir="));
         addHtml(current_dir);
+        if (!current_dir.endsWith(F("/"))) {
+          addHtml('/');
+        }
         addHtml(entry.name());
-        addHtml('/');
         addHtml(F("&chgto="));
         addHtml(current_dir);
         addHtml(F("\">Del</a>"));
@@ -427,8 +432,10 @@ void handle_SDfilelist() {
       {
         addHtml(F("<TD><a href=\"SDfilelist?chgto="));
         addHtml(current_dir);
+        if (!current_dir.endsWith(F("/"))) {
+          addHtml('/');
+        }
         addHtml(entry.name());
-        addHtml('/');
         addHtml('"', '>');
         addHtml(entry.name());
         addHtml(F("</a><TD>dir"));
@@ -438,7 +445,7 @@ void handle_SDfilelist() {
     else
     {
 
-      if (isProtectedFileType(String(entry.name())))
+      if (!isProtectedFileType(String(entry.name())))
       {
         addHtml(F("<a class='button link' onclick=\"return confirm('Delete this file?')\" href=\"SDfilelist?delete="));
         addHtml(current_dir);
@@ -455,7 +462,7 @@ void handle_SDfilelist() {
         addHtml('"', '>');
         addHtml(entry.name());
         addHtml(F("</a><TD>"));
-        addHtml(entry.size());
+        addHtmlInt(entry.size());
       }
     }
     entry.close();
@@ -465,7 +472,8 @@ void handle_SDfilelist() {
   html_end_table();
   html_end_form();
 
-  // addHtml(F("<BR><a class='button link' href=\"/upload\">Upload</a>"));
+  html_BR();
+  addButton(F("/uploadsd"), F("Upload"));
   sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
 }

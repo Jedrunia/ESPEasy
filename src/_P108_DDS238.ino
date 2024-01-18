@@ -45,6 +45,7 @@ boolean Plugin_108(uint8_t function, struct EventStruct *event, String& string) 
       Device[deviceCount].InverseLogicOption = false;
       Device[deviceCount].FormulaOption      = true;
       Device[deviceCount].ValueCount         = P108_NR_OUTPUT_VALUES;
+      Device[deviceCount].OutputDataType     = Output_Data_type_t::Simple;
       Device[deviceCount].SendDataOption     = true;
       Device[deviceCount].TimerOption        = true;
       Device[deviceCount].GlobalSyncOption   = true;
@@ -62,12 +63,9 @@ boolean Plugin_108(uint8_t function, struct EventStruct *event, String& string) 
         if (i < P108_NR_OUTPUT_VALUES) {
           const uint8_t pconfigIndex = i + P108_QUERY1_CONFIG_POS;
           uint8_t choice             = PCONFIG(pconfigIndex);
-          safe_strncpy(
-            ExtraTaskSettings.TaskDeviceValueNames[i],
-            Plugin_108_valuename(choice, false),
-            sizeof(ExtraTaskSettings.TaskDeviceValueNames[i]));
+          ExtraTaskSettings.setTaskDeviceValueName(i, Plugin_108_valuename(choice, false));
         } else {
-          ZERO_FILL(ExtraTaskSettings.TaskDeviceValueNames[i]);
+          ExtraTaskSettings.clearTaskDeviceValueName(i);
         }
       }
       break;
@@ -116,6 +114,22 @@ boolean Plugin_108(uint8_t function, struct EventStruct *event, String& string) 
       break;
     }
 
+    case PLUGIN_WEBFORM_LOAD_OUTPUT_SELECTOR:
+    {
+      const __FlashStringHelper *options[P108_NR_OUTPUT_OPTIONS];
+
+      for (int i = 0; i < P108_NR_OUTPUT_OPTIONS; ++i) {
+        options[i] = Plugin_108_valuename(i, true);
+      }
+
+      for (uint8_t i = 0; i < P108_NR_OUTPUT_VALUES; ++i) {
+        const uint8_t pconfigIndex = i + P108_QUERY1_CONFIG_POS;
+        sensorTypeHelper_loadOutputSelector(event, pconfigIndex, i, P108_NR_OUTPUT_OPTIONS, options);
+      }
+      success = true;
+      break;
+    }
+
     case PLUGIN_WEBFORM_LOAD: {
       P108_data_struct *P108_data =
         static_cast<P108_data_struct *>(getPluginTaskData(event->TaskIndex));
@@ -152,20 +166,6 @@ boolean Plugin_108(uint8_t function, struct EventStruct *event, String& string) 
         // addFormNote(F("Will clear all logged values when checked and saved"));
       }
 
-      {
-        // In a separate scope to free memory of String array as soon as possible
-        sensorTypeHelper_webformLoad_header();
-        const __FlashStringHelper *options[P108_NR_OUTPUT_OPTIONS];
-
-        for (int i = 0; i < P108_NR_OUTPUT_OPTIONS; ++i) {
-          options[i] = Plugin_108_valuename(i, true);
-        }
-
-        for (uint8_t i = 0; i < P108_NR_OUTPUT_VALUES; ++i) {
-          const uint8_t pconfigIndex = i + P108_QUERY1_CONFIG_POS;
-          sensorTypeHelper_loadOutputSelector(event, pconfigIndex, i, P108_NR_OUTPUT_OPTIONS, options);
-        }
-      }
       success = true;
       break;
     }
@@ -243,7 +243,7 @@ boolean Plugin_108(uint8_t function, struct EventStruct *event, String& string) 
 
       if ((nullptr != P108_data) && P108_data->isInitialized()) {
         for (int i = 0; i < P108_NR_OUTPUT_VALUES; ++i) {
-          UserVar[event->BaseVarIndex + i] = p108_readValue(PCONFIG(i + P108_QUERY1_CONFIG_POS), event);
+          UserVar.setFloat(event->TaskIndex, i,  p108_readValue(PCONFIG(i + P108_QUERY1_CONFIG_POS), event));
           delay(1);
         }
 

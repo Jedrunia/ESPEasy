@@ -54,6 +54,9 @@ struct P098_config_struct {
 
   bool encoder_pu = false;
   bool pwm_soft_startstop = false;
+
+  uint32_t virtualSpeed = 0; // steps per ms
+  int pos0supplement = 0; // steps
 };
 
 struct P098_limit_switch_state {
@@ -89,7 +92,8 @@ struct P098_data_struct : public PluginTaskData_base {
   };
 
   P098_data_struct(const P098_config_struct& config);
-  ~P098_data_struct();
+  P098_data_struct() = delete;
+  virtual ~P098_data_struct();
 
   bool begin(int pos,
              int limitApos,
@@ -126,7 +130,6 @@ struct P098_data_struct : public PluginTaskData_base {
   void getLimitSwitchPositions(int& limitA,
                                int& limitB) const;
 
-
   State state       = State::Idle;
   bool  initialized = false;
 
@@ -135,12 +138,14 @@ private:
   const P098_config_struct         _config;
   volatile P098_limit_switch_state limitA;
   volatile P098_limit_switch_state limitB;
-  volatile int                     position = 0;
+  ESPEASY_VOLATILE(int)            position = 0;
   volatile uint64_t                enc_lastChanged_us = 0;
+  uint64_t                         lastVirtualSpeedApplied_us = 0;
   int                              pos_dest = 0;
   int                              pos_overshoot = 0;
 
   void        startMoving();
+  void        updatePosition();
 
   void        checkLimit(volatile P098_limit_switch_state& switch_state);
   void        checkPosition();

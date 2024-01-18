@@ -72,6 +72,8 @@ void addFormNumericBox(LabelType::Enum label,
                        ,
                        const String  & tooltip = EMPTY_STRING
                        #endif // if FEATURE_TOOLTIPS
+                       ,
+                       bool disabled = false
                        );
 
 void addFormNumericBox(const __FlashStringHelper * label, 
@@ -83,6 +85,8 @@ void addFormNumericBox(const __FlashStringHelper * label,
                        ,
                        const String& tooltip = EMPTY_STRING
                        #endif // if FEATURE_TOOLTIPS
+                       ,
+                       bool disabled = false
                        );
 
 void addFormNumericBox(const String& label,
@@ -94,6 +98,8 @@ void addFormNumericBox(const String& label,
                        ,
                        const String& tooltip = EMPTY_STRING
                        #endif // if FEATURE_TOOLTIPS
+                       ,
+                       bool disabled = false
                        );
 
 
@@ -165,6 +171,8 @@ void addFormTextBox(const String& label,
                     ,
                     const String& tooltip = EMPTY_STRING
                     #endif // if FEATURE_TOOLTIPS
+                    ,
+                    const String& datalist = EMPTY_STRING
                     );
 
 void addFormTextBox(const __FlashStringHelper * classname,
@@ -179,6 +187,8 @@ void addFormTextBox(const __FlashStringHelper * classname,
                     ,
                     const String& tooltip = EMPTY_STRING
                     #endif // if FEATURE_TOOLTIPS
+                    ,
+                    const String& datalist  = EMPTY_STRING
                     );
 
 
@@ -236,6 +246,15 @@ void addFormMACBox(const String& label, const String& id, const MAC_address mac)
 void addFormIPaccessControlSelect(const __FlashStringHelper * label,
                                   const __FlashStringHelper * id,
                                   int           choice);
+
+// ********************************************************************************
+// a Separator character selector
+// ********************************************************************************
+void addFormSeparatorCharInput(const __FlashStringHelper *rowLabel,
+                               const __FlashStringHelper *id,
+                               int                        value,
+                               const String             & charset,
+                               const __FlashStringHelper *additionalText);
 
 // ********************************************************************************
 // Add a selector form

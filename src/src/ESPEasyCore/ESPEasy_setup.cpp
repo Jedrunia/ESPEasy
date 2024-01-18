@@ -4,12 +4,16 @@
 
 #include "../../ESPEasy-Globals.h"
 #include "../../_Plugin_Helper.h"
+#include "../Commands/InternalCommands_decoder.h"
 #include "../CustomBuild/CompiletimeDefines.h"
+#include "../ESPEasyCore/ESPEasyGPIO.h"
 #include "../ESPEasyCore/ESPEasyNetwork.h"
 #include "../ESPEasyCore/ESPEasyRules.h"
 #include "../ESPEasyCore/ESPEasyWifi.h"
+#include "../ESPEasyCore/ESPEasyWifi_ProcessEvent.h"
 #include "../ESPEasyCore/Serial.h"
 #include "../Globals/Cache.h"
+#include "../Globals/ESPEasy_Console.h"
 #include "../Globals/ESPEasyWiFiEvent.h"
 #include "../Globals/ESPEasy_time.h"
 #include "../Globals/NetworkState.h"
@@ -24,7 +28,7 @@
 #include "../Helpers/ESPEasy_FactoryDefault.h"
 #include "../Helpers/ESPEasy_Storage.h"
 #include "../Helpers/ESPEasy_checks.h"
-#include "../Helpers/Hardware.h"
+#include "../Helpers/Hardware_device_info.h"
 #include "../Helpers/Memory.h"
 #include "../Helpers/Misc.h"
 #include "../Helpers/StringGenerator_System.h"
@@ -41,9 +45,27 @@
 #endif // if FEATURE_ARDUINO_OTA
 
 #ifdef ESP32
+
+#if ESP_IDF_VERSION_MAJOR < 5
+#include <esp_pm.h>
+#include <soc/efuse_reg.h>
 #include <soc/boot_mode.h>
 #include <soc/gpio_reg.h>
-#include <soc/efuse_reg.h>
+#else
+#include <hal/efuse_hal.h>
+#include <rom/gpio.h>
+#include <esp_pm.h>
+#endif
+
+#if CONFIG_IDF_TARGET_ESP32
+#if ESP_IDF_VERSION_MAJOR < 5
+# include "hal/efuse_ll.h"
+# include "hal/efuse_hal.h"
+#else
+#include <soc/efuse_defs.h>
+#endif
+#endif
+
 #endif
 
 
@@ -100,7 +122,7 @@ void sw_watchdog_callback(void *arg)
 void ESPEasy_setup()
 {
 #if defined(ESP8266_DISABLE_EXTRA4K) || defined(USE_SECOND_HEAP)
-  disable_extra4k_at_link_time();
+//  disable_extra4k_at_link_time();
 #endif
 #ifdef PHASE_LOCKED_WAVEFORM
   enablePhaseLockedWaveform();
@@ -121,7 +143,11 @@ void ESPEasy_setup()
   // restore GPIO16/17 if no PSRAM is found
   if (!FoundPSRAM()) {
     // test if the CPU is not pico
+    #if ESP_IDF_VERSION_MAJOR < 5
     uint32_t chip_ver = REG_GET_FIELD(EFUSE_BLK0_RDATA3_REG, EFUSE_RD_CHIP_VER_PKG);
+    #else
+    uint32_t chip_ver = REG_GET_FIELD(EFUSE_BLK0_RDATA3_REG, EFUSE_RD_CHIP_PACKAGE);
+    #endif
     uint32_t pkg_version = chip_ver & 0x7;
     if (pkg_version <= 3) {   // D0WD, S0WD, D2WD
       gpio_reset_pin(GPIO_NUM_16);
@@ -136,6 +162,17 @@ void ESPEasy_setup()
   lowestRAM       = FreeMem();
 #endif // ifndef BUILD_NO_RAM_TRACKER
 
+#ifdef ESP32
+  ResetFactoryDefaultPreference.init();
+#endif
+
+#ifndef BUILD_NO_DEBUG
+//  checkAll_internalCommands();
+#endif
+
+  PluginSetup();
+  CPluginSetup();
+  
   initWiFi();
   WiFiEventData.clearAll();
 
@@ -164,8 +201,7 @@ void ESPEasy_setup()
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("setup"));
   #endif // ifndef BUILD_NO_RAM_TRACKER
-
-  Serial.begin(115200);
+  ESPEasy_Console.begin(115200);
 
   // serialPrint("\n\n\nBOOOTTT\n\n\n");
 
@@ -220,7 +256,7 @@ void ESPEasy_setup()
     {
       RTC.bootFailedCount++;
       RTC.bootCounter++;
-      lastMixedSchedulerId_beforereboot = RTC.lastMixedSchedulerId;
+      lastMixedSchedulerId_beforereboot.mixed_id = RTC.lastMixedSchedulerId;
       readUserVarFromRTC();
 
       log += F(" #");
@@ -265,9 +301,69 @@ void ESPEasy_setup()
 
   //  progMemMD5check();
   LoadSettings();
+#if FEATURE_DEFINE_SERIAL_CONSOLE_PORT
+  ESPEasy_Console.reInit();
+#endif
+
   #ifndef BUILD_NO_RAM_TRACKER
   logMemUsageAfter(F("LoadSettings()"));
   #endif
+
+#ifdef ESP32
+  if (Settings.EcoPowerMode()) {
+    // Configure dynamic frequency scaling:
+    // maximum and minimum frequencies are set in sdkconfig,
+    // automatic light sleep is enabled if tickless idle support is enabled.
+#if ESP_IDF_VERSION_MAJOR < 5
+#if CONFIG_IDF_TARGET_ESP32
+    esp_pm_config_esp32_t pm_config =
+#elif CONFIG_IDF_TARGET_ESP32S3
+    esp_pm_config_esp32s3_t pm_config =
+#elif CONFIG_IDF_TARGET_ESP32S2
+    esp_pm_config_esp32s2_t pm_config =
+#elif CONFIG_IDF_TARGET_ESP32C6
+    esp_pm_config_esp32c3_t pm_config =
+#elif CONFIG_IDF_TARGET_ESP32C3
+    esp_pm_config_esp32c3_t pm_config =
+#elif CONFIG_IDF_TARGET_ESP32C2
+    esp_pm_config_esp32c2_t pm_config =
+#endif
+    {
+            .max_freq_mhz = getCPU_MaxFreqMHz(),
+
+            .min_freq_mhz = getCPU_MinFreqMHz(),
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+            .light_sleep_enable = true
+#endif
+    };
+#else
+  esp_pm_config_t pm_config = {
+            .max_freq_mhz = getCPU_MaxFreqMHz(),
+            .min_freq_mhz = 80,
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+            .light_sleep_enable = true
+#else
+            .light_sleep_enable = false
+#endif
+    };
+#endif
+    esp_pm_configure(&pm_config);
+#if CONFIG_IDF_TARGET_ESP32
+  } else {
+    // Set the max/min frequency based on what's being reported by the efuses.
+    // Only ESP32 seems to have this function.
+    esp_pm_config_esp32_t pm_config = {
+            .max_freq_mhz = getCPU_MaxFreqMHz(),
+            .min_freq_mhz = getCPU_MinFreqMHz(),
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+            .light_sleep_enable = false
+#endif
+    };
+    esp_pm_configure(&pm_config);
+#endif
+  }
+#endif
+
 
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("hardwareInit"));
@@ -317,12 +413,23 @@ void ESPEasy_setup()
   // This only works after LoadSettings();
   // Do not call setNetworkMedium here as that may try to clean up settings.
   active_network_medium = Settings.NetworkMedium;
+  #else
+  if (Settings.NetworkMedium == NetworkMedium_t::Ethernet) {
+    Settings.NetworkMedium = NetworkMedium_t::WIFI;
+  }
   #endif // if FEATURE_ETHERNET
 
-  if (active_network_medium == NetworkMedium_t::WIFI) {
+  setNetworkMedium(Settings.NetworkMedium);
+
+  bool initWiFi = active_network_medium == NetworkMedium_t::WIFI;
+  // FIXME TD-er: Must add another check for 'delayed start WiFi' for poorly designed ESP8266 nodes.
+
+
+  if (initWiFi) {
+    WiFi_AP_Candidates.clearCache();
     WiFi_AP_Candidates.load_knownCredentials();
     setSTA(true);
-    if (!WiFi_AP_Candidates.hasKnownCredentials()) {
+    if (!WiFi_AP_Candidates.hasCandidates()) {
       WiFiEventData.wifiSetup = true;
       RTC.clearLastWiFi(); // Must scan all channels
       // Wait until scan has finished to make sure as many as possible are found
@@ -334,8 +441,17 @@ void ESPEasy_setup()
     // Always perform WiFi scan
     // It appears reconnecting from RTC may take just as long to be able to send first packet as performing a scan first and then connect.
     // Perhaps the WiFi radio needs some time to stabilize first?
-    WifiScan(false);
-    setWifiMode(WIFI_OFF);
+    if (!WiFi_AP_Candidates.hasCandidates()) {
+      WifiScan(false, RTC.lastWiFiChannel);
+    }
+    WiFi_AP_Candidates.clearCache();
+    processScanDone();
+    WiFi_AP_Candidates.load_knownCredentials();
+    if (!WiFi_AP_Candidates.hasCandidates()) {
+      addLog(LOG_LEVEL_INFO, F("Setup: Scan all channels"));
+      WifiScan(false);
+    }
+//    setWifiMode(WIFI_OFF);
   }
   #ifndef BUILD_NO_RAM_TRACKER
   logMemUsageAfter(F("WifiScan()"));
@@ -368,11 +484,6 @@ void ESPEasy_setup()
   logMemUsageAfter(F("initSerial()"));
   #endif
 
-
-  if (Settings.Build != get_build_nr()) {
-    BuildFixes();
-  }
-
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
     String log  = F("INIT : Free RAM:");
     log += FreeMem();
@@ -381,7 +492,7 @@ void ESPEasy_setup()
 
 # ifndef BUILD_NO_DEBUG
   if (Settings.UseSerial && (Settings.SerialLogLevel >= LOG_LEVEL_DEBUG_MORE)) {
-    Serial.setDebugOutput(true);
+    ESPEasy_Console.setDebugOutput(true);
   }
 #endif
 
@@ -399,13 +510,16 @@ void ESPEasy_setup()
   #endif // if FEATURE_NOTIFIER
 
   PluginInit();
+
+  initSerial(); // Plugins may have altered serial, so re-init serial
+  
   #ifndef BUILD_NO_RAM_TRACKER
   logMemUsageAfter(F("PluginInit()"));
   #endif
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
     String log;
     log.reserve(80);
-    log += concat(F("INFO : Plugins: "), deviceCount + 1);
+    log += concat(F("INFO : Plugins: "), getDeviceCount() + 1);
     log += ' ';
     log += getPluginDescriptionString();
     log += F(" (");
@@ -414,9 +528,11 @@ void ESPEasy_setup()
     addLogMove(LOG_LEVEL_INFO, log);
   }
 
-  if (deviceCount + 1 >= PLUGIN_MAX) {
-    addLog(LOG_LEVEL_ERROR, concat(F("Programming error! - Increase PLUGIN_MAX ("), deviceCount) + ')');
+/*
+  if ((getDeviceCount() + 1) >= PLUGIN_MAX) {
+    addLog(LOG_LEVEL_ERROR, concat(F("Programming error! - Increase PLUGIN_MAX ("), getDeviceCount()) + ')');
   }
+*/
 
   clearAllCaches();
   #ifndef BUILD_NO_RAM_TRACKER
@@ -441,17 +557,32 @@ void ESPEasy_setup()
     const uint32_t gpio_strap =   GPIO_REG_READ(GPIO_STRAP_REG);
 //    BOOT_MODE_GET();
 
-    // Event values: GPIO-5, GPIO-15, GPIO-4, GPIO-2
+    // Event values: 
+    // ESP32   :  GPIO-5, GPIO-15, GPIO-4, GPIO-2, GPIO-0, GPIO-12
+    // ESP32-C3:  bit 0: GPIO2, bit 2: GPIO8, bit 3: GPIO9
+    // ESP32-S2: Unclear what bits represent which strapping state.
+    // ESP32-S3: bit5 ~ bit2 correspond to strapping pins GPIO3, GPIO45, GPIO0, and GPIO46 respectively.
     String event = F("System#BootMode=");
-    event += bitRead(gpio_strap, 0); // GPIO-5
+    event += bitRead(gpio_strap, 0); 
     event += ',';
-    event += bitRead(gpio_strap, 1); // GPIO-15
+    event += bitRead(gpio_strap, 1); 
     event += ',';
-    event += bitRead(gpio_strap, 2); // GPIO-4
+    event += bitRead(gpio_strap, 2); 
     event += ',';
-    event += bitRead(gpio_strap, 3); // GPIO-2
+    event += bitRead(gpio_strap, 3); 
+    event += ',';
+    event += bitRead(gpio_strap, 4); 
+    event += ',';
+    event += bitRead(gpio_strap, 5); 
     rulesProcessing(event);
   }
+  #endif
+
+  #if FEATURE_ETHERNET
+  if (Settings.ETH_Pin_power != -1) {
+    GPIO_Write(PLUGIN_GPIO, Settings.ETH_Pin_power, 1);
+  }
+
   #endif
 
   NetworkConnectRelaxed();
@@ -522,12 +653,12 @@ void ESPEasy_setup()
   // Start the interval timers at N msec from now.
   // Make sure to start them at some time after eachother,
   // since they will keep running at the same interval.
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_20MSEC,     5);    // timer for periodic actions 50 x per/sec
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_100MSEC,    66);   // timer for periodic actions 10 x per/sec
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_1SEC,       777);  // timer for periodic actions once per/sec
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_30SEC,      1333); // timer for watchdog once per 30 sec
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_MQTT,       88);   // timer for interaction with MQTT
-  Scheduler.setIntervalTimerOverride(ESPEasy_Scheduler::IntervalTimer_e::TIMER_STATISTICS, 2222);
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_20MSEC,     5);    // timer for periodic actions 50 x per/sec
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_100MSEC,    66);   // timer for periodic actions 10 x per/sec
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_1SEC,       777);  // timer for periodic actions once per/sec
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_30SEC,      1333); // timer for watchdog once per 30 sec
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_MQTT,       88);   // timer for interaction with MQTT
+  Scheduler.setIntervalTimerOverride(SchedulerIntervalTimer_e::TIMER_STATISTICS, 2222);
   #ifndef BUILD_NO_RAM_TRACKER
   logMemUsageAfter(F("Scheduler.setIntervalTimerOverride"));
   #endif

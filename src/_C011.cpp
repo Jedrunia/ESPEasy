@@ -49,13 +49,13 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
   {
     case CPlugin::Function::CPLUGIN_PROTOCOL_ADD:
     {
-      Protocol[++protocolCount].Number     = CPLUGIN_ID_011;
-      Protocol[protocolCount].usesMQTT     = false;
-      Protocol[protocolCount].usesAccount  = true;
-      Protocol[protocolCount].usesPassword = true;
-      Protocol[protocolCount].usesExtCreds = true;
-      Protocol[protocolCount].defaultPort  = 80;
-      Protocol[protocolCount].usesID       = false;
+      ProtocolStruct& proto = getProtocolStruct(event->idx); //      = CPLUGIN_ID_011;
+      proto.usesMQTT     = false;
+      proto.usesAccount  = true;
+      proto.usesPassword = true;
+      proto.usesExtCreds = true;
+      proto.defaultPort  = 80;
+      proto.usesID       = false;
       break;
     }
 
@@ -71,8 +71,8 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
         MakeControllerSettings(ControllerSettings); //-V522
 
         if (AllocatedControllerSettings()) {
-          LoadControllerSettings(event->ControllerIndex, ControllerSettings);
-          C011_sendBinary = ControllerSettings.sendBinary();
+          LoadControllerSettings(event->ControllerIndex, *ControllerSettings);
+          C011_sendBinary = ControllerSettings->sendBinary();
         }
       }
       success = init_c011_delay_queue(event->ControllerIndex);
@@ -128,8 +128,8 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
         if (!AllocatedControllerSettings()) {
           addHtmlError(F("Out of memory, cannot load page"));
         } else {
-          LoadControllerSettings(event->ControllerIndex, ControllerSettings);
-          addControllerParameterForm(ControllerSettings, event->ControllerIndex, ControllerSettingsStruct::CONTROLLER_SEND_BINARY);
+          LoadControllerSettings(event->ControllerIndex, *ControllerSettings);
+          addControllerParameterForm(*ControllerSettings, event->ControllerIndex, ControllerSettingsStruct::CONTROLLER_SEND_BINARY);
           addFormNote(F("Do not 'percent escape' body when send binary checked"));
         }
       }
@@ -138,15 +138,7 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
 
     case CPlugin::Function::CPLUGIN_WEBFORM_SAVE:
     {
-      std::shared_ptr<C011_ConfigStruct> customConfig;
-      {
-        // Try to allocate on 2nd heap
-        #ifdef USE_SECOND_HEAP
-//        HeapSelectIram ephemeral;
-        #endif
-        std::shared_ptr<C011_ConfigStruct> tmp_shared(new (std::nothrow) C011_ConfigStruct);
-        customConfig = std::move(tmp_shared);
-      }
+      std::shared_ptr<C011_ConfigStruct> customConfig(new (std::nothrow) C011_ConfigStruct);
 
       if (customConfig) {
         uint8_t   choice    = 0;
@@ -176,6 +168,9 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
 
     case CPlugin::Function::CPLUGIN_PROTOCOL_SEND:
     {
+      if (C011_DelayHandler->queueFull(event->ControllerIndex)) {
+        break;
+      }
       success = Create_schedule_HTTP_C011(event);
       break;
     }
@@ -199,7 +194,8 @@ bool CPlugin_011(CPlugin::Function function, struct EventStruct *event, String& 
 
 // Uncrustify may change this into multi line, which will result in failed builds
 // *INDENT-OFF*
-bool do_process_c011_delay_queue(int controller_number, const C011_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
+bool do_process_c011_delay_queue(int controller_number, const Queue_element_base& element_base, ControllerSettingsStruct& ControllerSettings) {
+  const C011_queue_element& element = static_cast<const C011_queue_element&>(element_base);
 // *INDENT-ON*
 
   if (!NetworkConnected()) { return false; }
@@ -209,7 +205,7 @@ bool do_process_c011_delay_queue(int controller_number, const C011_queue_element
   send_via_http(
     controller_number,
     ControllerSettings,
-    element.controller_idx,
+    element._controller_idx,
     element.uri,
     element.HttpMethod,
     element.header,
@@ -224,25 +220,17 @@ bool do_process_c011_delay_queue(int controller_number, const C011_queue_element
 
 bool load_C011_ConfigStruct(controllerIndex_t ControllerIndex, String& HttpMethod, String& HttpUri, String& HttpHeader, String& HttpBody) {
   // Just copy the needed strings and destruct the C011_ConfigStruct as soon as possible
-  std::shared_ptr<C011_ConfigStruct> customConfig;
-  {
-    // Try to allocate on 2nd heap
-    #ifdef USE_SECOND_HEAP
-//    HeapSelectIram ephemeral;
-    #endif
-    std::shared_ptr<C011_ConfigStruct> tmp_shared(new (std::nothrow) C011_ConfigStruct);
-    customConfig = std::move(tmp_shared);
-  }
+  std::shared_ptr<C011_ConfigStruct> customConfig(new (std::nothrow) C011_ConfigStruct);
 
   if (!customConfig) {
     return false;
   }
   LoadCustomControllerSettings(ControllerIndex, reinterpret_cast<uint8_t *>(customConfig.get()), sizeof(C011_ConfigStruct));
   customConfig->zero_last();
-  HttpMethod = customConfig->HttpMethod;
-  HttpUri    = customConfig->HttpUri;
-  HttpHeader = customConfig->HttpHeader;
-  HttpBody   =  customConfig->HttpBody;
+  move_special(HttpMethod, String(customConfig->HttpMethod));
+  move_special(HttpUri   , String(customConfig->HttpUri));
+  move_special(HttpHeader, String(customConfig->HttpHeader));
+  move_special(HttpBody  , String(customConfig->HttpBody));
   return true;
 }
 
@@ -258,23 +246,25 @@ boolean Create_schedule_HTTP_C011(struct EventStruct *event)
   //LoadTaskSettings(event->TaskIndex); // FIXME TD-er: This can probably be removed
 
   // Add a new element to the queue with the minimal payload
-  bool success = C011_DelayHandler->addToQueue(C011_queue_element(event));
+  std::unique_ptr<C011_queue_element> element(new C011_queue_element(event));
+  bool success = C011_DelayHandler->addToQueue(std::move(element));
 
   if (success) {
     // Element was added.
     // Now we try to append to the existing element
     // and thus preventing the need to create a long string only to copy it to a queue element.
-    C011_queue_element& element = C011_DelayHandler->sendQueue.back();
+    C011_queue_element& element = static_cast<C011_queue_element&>(*(C011_DelayHandler->sendQueue.back()));
+
 
     if (!load_C011_ConfigStruct(event->ControllerIndex, element.HttpMethod, element.uri, element.header, element.postStr))
     {
       if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
-        String log = F("C011   : ");
-        log += element.HttpMethod;
-        log += element.uri;
-        log += element.header;
-        log += element.postStr;
-        addLogMove(LOG_LEVEL_ERROR, log);
+        addLogMove(LOG_LEVEL_ERROR, strformat(
+          F("C011   : %s %s %s %s"),
+          element.HttpMethod.c_str(),
+          element.uri.c_str(),
+          element.header.c_str(),
+          element.postStr.c_str()));
       }
       C011_DelayHandler->sendQueue.pop_back();
       return false;
@@ -291,7 +281,7 @@ boolean Create_schedule_HTTP_C011(struct EventStruct *event)
     addLog(LOG_LEVEL_ERROR, F("C011  : Could not add to delay handler"));
   }
 
-  Scheduler.scheduleNextDelayQueue(ESPEasy_Scheduler::IntervalTimer_e::TIMER_C011_DELAY_QUEUE, C011_DelayHandler->getNextScheduleTime());
+  Scheduler.scheduleNextDelayQueue(SchedulerIntervalTimer_e::TIMER_C011_DELAY_QUEUE, C011_DelayHandler->getNextScheduleTime());
   return success;
 }
 
@@ -303,13 +293,8 @@ void DeleteNotNeededValues(String& s, uint8_t numberOfValuesWanted)
 
   for (uint8_t i = 1; i < 5; i++)
   {
-    String startToken;
-    startToken += '%';
-    startToken += i;
-    startToken += '%';
-    String endToken = F("%/");
-    endToken += i;
-    endToken += '%';
+    const String startToken(strformat(F("%%%d%%"), i));
+    const String endToken(strformat(F("%%/%d%%"), i));
 
     // do we want to keep this one?
     if (i < numberOfValuesWanted)

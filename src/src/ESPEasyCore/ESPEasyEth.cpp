@@ -7,10 +7,13 @@
 #include "../ESPEasyCore/ESPEasyWifi.h"
 #include "../ESPEasyCore/ESPEasy_Log.h"
 #include "../ESPEasyCore/ESPEasyGPIO.h"
-#include "../Globals/ESPEasyWiFiEvent.h"
+#include "../ESPEasyCore/ESPEasyEthEvent.h"
+#include "../Globals/ESPEasyEthEvent.h"
 #include "../Globals/NetworkState.h"
 #include "../Globals/Settings.h"
+#include "../Helpers/Hardware_GPIO.h"
 #include "../Helpers/StringConverter.h"
+#include "../Helpers/Networking.h"
 
 #include <ETH.h>
 #include <lwip/dns.h>
@@ -20,13 +23,15 @@
  #include <eth_phy/phy.h>
 #endif
 
+#include <WiFi.h>
+
 bool ethUseStaticIP() {
   return Settings.ETH_IP[0] != 0 && Settings.ETH_IP[0] != 255;
 }
 
 void ethSetupStaticIPconfig() {
+  const IPAddress IP_zero(0, 0, 0, 0); 
   if (!ethUseStaticIP()) { 
-    const IPAddress IP_zero(0, 0, 0, 0); 
     if (!ETH.config(IP_zero, IP_zero, IP_zero, IP_zero)) {
       addLog(LOG_LEVEL_ERROR, F("ETH  : Cannot set IP config"));
     }
@@ -36,6 +41,10 @@ void ethSetupStaticIPconfig() {
   const IPAddress gw     = Settings.ETH_Gateway;
   const IPAddress subnet = Settings.ETH_Subnet;
   const IPAddress dns    = Settings.ETH_DNS;
+
+  EthEventData.dns0_cache = dns;
+  EthEventData.dns1_cache = IP_zero;
+
 
   if (loglevelActiveFor(LOG_LEVEL_INFO)) {
     String log = F("ETH IP   : Static IP : ");
@@ -49,51 +58,23 @@ void ethSetupStaticIPconfig() {
     addLogMove(LOG_LEVEL_INFO, log);
   }
   ETH.config(ip, gw, subnet, dns);
-}
-
-void ethSetDNS(const IPAddress& dns0, const IPAddress& dns1) 
-{
-  ip_addr_t d;
-  d.type = IPADDR_TYPE_V4;
-  bool set_dns = false;
-
-  if(dns0 != (uint32_t)0x00000000 && dns0 != INADDR_NONE) {
-    // Set DNS0-Server
-    d.u_addr.ip4.addr = static_cast<uint32_t>(dns0);
-    dns_setserver(0, &d);
-    set_dns = true;
-  }
-
-  if(dns1 != (uint32_t)0x00000000 && dns1 != INADDR_NONE) {
-    // Set DNS1-Server
-    d.u_addr.ip4.addr = static_cast<uint32_t>(dns1);
-    dns_setserver(1, &d);
-    set_dns = true;
-  }
-  if (set_dns && loglevelActiveFor(LOG_LEVEL_INFO)) {
-    String log = F("ETH IP   : Set DNS: ");
-    log += formatIP(dns0);
-    log += '/';
-    log += formatIP(dns1);
-    addLogMove(LOG_LEVEL_INFO, log);
-  }
+  setDNS(0, EthEventData.dns0_cache);
+  setDNS(1, EthEventData.dns1_cache);
 }
 
 bool ethCheckSettings() {
   return isValid(Settings.ETH_Phy_Type) 
       && isValid(Settings.ETH_Clock_Mode)
       && isValid(Settings.NetworkMedium)
-      && (Settings.ETH_Pin_mdc   <= MAX_GPIO)
-      && (Settings.ETH_Pin_mdio  <= MAX_GPIO)
-      && (Settings.ETH_Pin_power <= MAX_GPIO);
+      && validGpio(Settings.ETH_Pin_mdc)
+      && validGpio(Settings.ETH_Pin_mdio)
+      && (validGpio(Settings.ETH_Pin_power) || (Settings.ETH_Pin_power == -1)); // Some boards have fixed power
 }
 
 bool ethPrepare() {
-  {
-    char hostname[40];
-    safe_strncpy(hostname, NetworkCreateRFCCompliantHostname().c_str(), sizeof(hostname));
-    ETH.setHostname(hostname);
-  }
+  char hostname[40];
+  safe_strncpy(hostname, NetworkCreateRFCCompliantHostname().c_str(), sizeof(hostname));
+  ETH.setHostname(hostname);
   ethSetupStaticIPconfig();
   return true;
 }
@@ -135,6 +116,21 @@ MAC_address ETHMacAddress() {
   return mac;
 }
 
+void removeEthEventHandler()
+{
+  WiFi.removeEvent(EthEventData.wm_event_id);
+  EthEventData.wm_event_id = 0;
+}
+
+void registerEthEventHandler()
+{
+  if (EthEventData.wm_event_id != 0) {
+    removeEthEventHandler();
+  }
+  EthEventData.wm_event_id = WiFi.onEvent(EthEvent);
+}
+
+
 bool ETHConnectRelaxed() {
   if (EthEventData.ethInitSuccess) {
     return EthLinkUp();
@@ -147,20 +143,17 @@ bool ETHConnectRelaxed() {
     return false;
   }
   // Re-register event listener
-  #if defined(ESP32)
-  removeWiFiEventHandler();
-  #endif
+  removeEthEventHandler();
 
   ethPower(true);
   EthEventData.markEthBegin();
 
   // Re-register event listener
-  #if defined(ESP32)
-  registerWiFiEventHandler();
-  #endif
+  registerEthEventHandler();
 
   if (!EthEventData.ethInitSuccess) {
     ethResetGPIOpins();
+#if ESP_IDF_VERSION_MAJOR < 5
     EthEventData.ethInitSuccess = ETH.begin( 
       Settings.ETH_Phy_Addr,
       Settings.ETH_Pin_power,
@@ -168,6 +161,16 @@ bool ETHConnectRelaxed() {
       Settings.ETH_Pin_mdio,
       (eth_phy_type_t)Settings.ETH_Phy_Type,
       (eth_clock_mode_t)Settings.ETH_Clock_Mode);
+#else
+    EthEventData.ethInitSuccess = ETH.begin( 
+      (eth_phy_type_t)Settings.ETH_Phy_Type,
+      Settings.ETH_Phy_Addr,
+      Settings.ETH_Pin_mdc,
+      Settings.ETH_Pin_mdio,
+      Settings.ETH_Pin_power,
+      (eth_clock_mode_t)Settings.ETH_Clock_Mode);
+
+#endif
   }
   if (EthEventData.ethInitSuccess) {
     // FIXME TD-er: Not sure if this is correctly set to false
@@ -187,9 +190,10 @@ void ethPower(bool enable) {
       // Already the desired state
       return;
     }
-    EthEventData.ethInitSuccess = false;
-    EthEventData.clearAll();
+    addLog(LOG_LEVEL_INFO, enable ? F("ETH power ON") : F("ETH power OFF"));
     if (!enable) {
+      EthEventData.ethInitSuccess = false;
+      EthEventData.clearAll();
       #ifdef ESP_IDF_VERSION_MAJOR
       // FIXME TD-er: See: https://github.com/espressif/arduino-esp32/issues/6105
       // Need to store the last link state, as it will be cleared after destructing the object.
@@ -198,14 +202,14 @@ void ethPower(bool enable) {
         EthEventData.setEthConnected();
       }
       #endif
-      ETH = ETHClass();
+//      ETH = ETHClass();
     }
     if (enable) {
-      ethResetGPIOpins();
+//      ethResetGPIOpins();
     }
-    gpio_reset_pin((gpio_num_t)Settings.ETH_Pin_power);
+//    gpio_reset_pin((gpio_num_t)Settings.ETH_Pin_power);
 
-    GPIO_Write(1, Settings.ETH_Pin_power, enable ? 1 : 0);
+    GPIO_Write(PLUGIN_GPIO, Settings.ETH_Pin_power, enable ? 1 : 0);
     if (!enable) {
       if (Settings.ETH_Clock_Mode == EthClockMode_t::Ext_crystal_osc) {
         delay(600); // Give some time to discharge any capacitors
@@ -221,6 +225,7 @@ void ethResetGPIOpins() {
   // fix an disconnection issue after rebooting Olimex POE - this forces a clean state for all GPIO involved in RMII
   // Thanks to @s-hadinger and @Jason2866
   // Resetting state of power pin is done in ethPower()
+  addLog(LOG_LEVEL_INFO, F("ethResetGPIOpins()"));
   gpio_reset_pin((gpio_num_t)Settings.ETH_Pin_mdc);
   gpio_reset_pin((gpio_num_t)Settings.ETH_Pin_mdio);
   gpio_reset_pin(GPIO_NUM_19);    // EMAC_TXD0 - hardcoded
@@ -229,6 +234,7 @@ void ethResetGPIOpins() {
   gpio_reset_pin(GPIO_NUM_25);    // EMAC_RXD0 - hardcoded
   gpio_reset_pin(GPIO_NUM_26);    // EMAC_RXD1 - hardcoded
   gpio_reset_pin(GPIO_NUM_27);    // EMAC_RX_CRS_DV - hardcoded
+  /*
   switch (Settings.ETH_Clock_Mode) {
     case EthClockMode_t::Ext_crystal_osc:       // ETH_CLOCK_GPIO0_IN
     case EthClockMode_t::Int_50MHz_GPIO_0:      // ETH_CLOCK_GPIO0_OUT
@@ -241,6 +247,7 @@ void ethResetGPIOpins() {
       gpio_reset_pin(GPIO_NUM_17);
       break;
   }
+  */
   delay(1);
 }
 

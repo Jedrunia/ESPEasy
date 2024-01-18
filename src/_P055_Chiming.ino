@@ -219,7 +219,7 @@ boolean Plugin_055(uint8_t function, struct EventStruct *event, String& string)
 
         String command = parseString(string, 1);
 
-        if (command.equals(F("chime")))
+        if (equals(command, F("chime")))
         {
           String param = parseStringToEndKeepCase(string, 2);
           if (param.length() > 0) {
@@ -227,7 +227,7 @@ boolean Plugin_055(uint8_t function, struct EventStruct *event, String& string)
           }
           success = true;
         }
-        if (command.equals(F("chimeplay")))
+        if (equals(command, F("chimeplay")))
         {
           String name = parseString(string, 2);
           if (name.length() > 0) {
@@ -237,7 +237,7 @@ boolean Plugin_055(uint8_t function, struct EventStruct *event, String& string)
           }
           success = true;
         }
-        if (command.equals(F("chimesave")))
+        if (equals(command, F("chimesave")))
         {
           String name = parseString(string, 2);
           String param = parseStringToEndKeepCase(string, 3);
@@ -463,13 +463,11 @@ void Plugin_055_AddStringFIFO(const String& param)
 
 void Plugin_055_WriteChime(const String& name, const String& tokens)
 {
-  String fileName = F("chime_");
-  fileName += name;
-  fileName += F(".txt");
+  const String fileName = strformat(F("chime_%s.txt"), name.c_str());
 
-  String log = F("Chime: write ");
-  log += fileName;
-  log += ' ';
+  String log;
+  if (loglevelActiveFor(LOG_LEVEL_INFO))
+    log = strformat(F("Chime: write %s "), fileName.c_str());
 
   fs::File f = tryOpenFile(fileName, "w");
   if (f)
@@ -477,7 +475,8 @@ void Plugin_055_WriteChime(const String& name, const String& tokens)
     f.print(tokens);
     f.close();
     //flashCount();
-    log += tokens;
+    if (loglevelActiveFor(LOG_LEVEL_INFO))
+      log += tokens;
   }
 
   addLogMove(LOG_LEVEL_INFO, log);
@@ -485,13 +484,11 @@ void Plugin_055_WriteChime(const String& name, const String& tokens)
 
 uint8_t Plugin_055_ReadChime(const String& name, String& tokens)
 {
-  String fileName = F("chime_");
-  fileName += name;
-  fileName += F(".txt");
+  const String fileName = strformat(F("chime_%s.txt"), name.c_str());
 
-  String log = F("Chime: read ");
-  log += fileName;
-  log += ' ';
+  String log;
+  if (loglevelActiveFor(LOG_LEVEL_INFO))
+    log = strformat(F("Chime: read %s "), fileName.c_str());
 
   tokens = String();
   fs::File f = tryOpenFile(fileName, "r");
@@ -505,8 +502,8 @@ uint8_t Plugin_055_ReadChime(const String& name, String& tokens)
       tokens += c;
     }
     f.close();
-
-    log += tokens;
+    if (loglevelActiveFor(LOG_LEVEL_INFO))
+      log += tokens;
   }
 
   addLogMove(LOG_LEVEL_INFO, log);

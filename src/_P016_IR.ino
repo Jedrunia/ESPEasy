@@ -181,12 +181,11 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
     {
       Device[++deviceCount].Number = PLUGIN_ID_016;
       Device[deviceCount].Type     = DEVICE_TYPE_SINGLE;
-
-      if (P016_SEND_IR_TO_CONTROLLER) {
+#if P016_SEND_IR_TO_CONTROLLER
         Device[deviceCount].VType = Sensor_VType::SENSOR_TYPE_STRING;
-      } else {
-        Device[deviceCount].VType = Sensor_VType::SENSOR_TYPE_LONG;
-      }
+#else
+        Device[deviceCount].VType = Sensor_VType::SENSOR_TYPE_ULONG;
+#endif
       Device[deviceCount].Ports              = 0;
       Device[deviceCount].PullUpOption       = true;
       Device[deviceCount].InverseLogicOption = true;
@@ -233,7 +232,7 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
 
       int irPin = CONFIG_PIN1;
 
-      if ((irReceiver == nullptr) && (irPin != -1))
+      if ((irReceiver == nullptr) && validGpio(irPin))
       {
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {
           addLog(LOG_LEVEL_INFO, F("INIT: IR RX"));
@@ -493,7 +492,7 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
       # if P016_FEATURE_COMMAND_HANDLING
       P016_CMDINHIBIT = getFormItemInt(F("pcmdinhibit"));
       # endif // if P016_FEATURE_COMMAND_HANDLING
-      P016_BUFFERSIZE = ceil(getFormItemInt(F("pbuffersize")) / 2.0f); // UI shows bytes, we store buffer unit = uint16_t
+      P016_BUFFERSIZE = (getFormItemInt(F("pbuffersize")) + 1) >> 1; // UI shows bytes, we store buffer unit = uint16_t
 
       # if P016_FEATURE_COMMAND_HANDLING
 
@@ -513,7 +512,7 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
           strError.clear();
 
           // Normal Code & flags
-          line.CodeDecodeType = static_cast<decode_type_t>(getFormItemInt(getPluginCustomArgName(rowCnt + 0)));
+          line.CodeDecodeType = static_cast<decode_type_t>(getFormItemIntCustomArgName(rowCnt + 0));
           bitWrite(line.CodeFlags, P16_FLAGS_REPEAT, isFormItemChecked(getPluginCustomArgName(rowCnt + 1)));
           line.Code = 0;
 
@@ -531,7 +530,7 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
 
           // Alternate Code & flags
           line.AlternativeCodeDecodeType =
-            static_cast<decode_type_t>(getFormItemInt(getPluginCustomArgName(rowCnt + 3)));
+            static_cast<decode_type_t>(getFormItemIntCustomArgName(rowCnt + 3));
           bitWrite(line.AlternativeCodeFlags, P16_FLAGS_REPEAT,
                    isFormItemChecked(getPluginCustomArgName(rowCnt + 4)));
           line.AlternativeCode = 0;
@@ -825,10 +824,12 @@ boolean Plugin_016(uint8_t function, struct EventStruct *event, String& string)
         }
         # endif // P016_P035_Extended_AC
 
-        if (!P016_SEND_IR_TO_CONTROLLER) {
+#if !P016_SEND_IR_TO_CONTROLLER
+        {
           unsigned long IRcode = results.value;
           UserVar.setSensorTypeLong(event->TaskIndex, IRcode);
         }
+#endif
         sendData(event);
       }
       success = true;

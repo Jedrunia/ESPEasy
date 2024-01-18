@@ -18,14 +18,14 @@ bool CPlugin_008(CPlugin::Function function, struct EventStruct *event, String& 
   {
     case CPlugin::Function::CPLUGIN_PROTOCOL_ADD:
     {
-      Protocol[++protocolCount].Number     = CPLUGIN_ID_008;
-      Protocol[protocolCount].usesMQTT     = false;
-      Protocol[protocolCount].usesTemplate = true;
-      Protocol[protocolCount].usesAccount  = true;
-      Protocol[protocolCount].usesPassword = true;
-      Protocol[protocolCount].usesExtCreds = true;
-      Protocol[protocolCount].defaultPort  = 80;
-      Protocol[protocolCount].usesID       = true;
+      ProtocolStruct& proto = getProtocolStruct(event->idx); //      = CPLUGIN_ID_008;
+      proto.usesMQTT     = false;
+      proto.usesTemplate = true;
+      proto.usesAccount  = true;
+      proto.usesPassword = true;
+      proto.usesExtCreds = true;
+      proto.defaultPort  = 80;
+      proto.usesID       = true;
       break;
     }
 
@@ -59,6 +59,10 @@ bool CPlugin_008(CPlugin::Function function, struct EventStruct *event, String& 
       if (C008_DelayHandler == nullptr) {
         break;
       }
+      if (C008_DelayHandler->queueFull(event->ControllerIndex)) {
+        break;
+      }
+
 
       String pubname;
       {
@@ -69,19 +73,19 @@ bool CPlugin_008(CPlugin::Function function, struct EventStruct *event, String& 
           addLog(LOG_LEVEL_ERROR, F("C008 : Generic HTTP - Cannot send, out of RAM"));
           break;
         }
-        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
-        pubname = ControllerSettings.Publish;
+        LoadControllerSettings(event->ControllerIndex, *ControllerSettings);
+        pubname = ControllerSettings->Publish;
       }
 
-      
       uint8_t valueCount = getValueCountForTask(event->TaskIndex);
-      success = C008_DelayHandler->addToQueue(C008_queue_element(event, valueCount));
+      std::unique_ptr<C008_queue_element> element(new C008_queue_element(event, valueCount));
+      success = C008_DelayHandler->addToQueue(std::move(element));
 
       if (success) {
         // Element was added.
         // Now we try to append to the existing element
         // and thus preventing the need to create a long string only to copy it to a queue element.
-        C008_queue_element& element = C008_DelayHandler->sendQueue.back();
+        C008_queue_element& element = static_cast<C008_queue_element&>(*(C008_DelayHandler->sendQueue.back()));
 
         // Collect the values at the same run, to make sure all are from the same sample
         //LoadTaskSettings(event->TaskIndex); // FIXME TD-er: This can probably be removed
@@ -90,21 +94,35 @@ bool CPlugin_008(CPlugin::Function function, struct EventStruct *event, String& 
         for (uint8_t x = 0; x < valueCount; x++)
         {
           bool   isvalid;
-          const String formattedValue = formatUserVar(event, x, isvalid);
+          const String formattedValue = formatUserVar(event, x , isvalid);
 
           if (isvalid) {
-            element.txt[x]  = '/';
-            element.txt[x] += pubname;
-            parseSingleControllerVariable(element.txt[x], event, x, true);
-            element.txt[x].replace(F("%value%"), formattedValue);
+            // First store in a temporary string, so we can use move_special to allocate on the best heap
+            String txt;
+            txt += '/';
+            txt += pubname;
+            parseSingleControllerVariable(txt, event, x, true);
+
 # ifndef BUILD_NO_DEBUG
-            if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE))
-              addLog(LOG_LEVEL_DEBUG_MORE, element.txt[x]);
+            if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+              addLog(LOG_LEVEL_DEBUG, strformat(
+                F("C008 : pubname: %s value: %s"),
+                pubname.c_str(),
+                formattedValue.c_str()
+              ));
+            }
+#endif
+            txt.replace(F("%value%"), formattedValue);
+            move_special(element.txt[x], std::move(txt));
+# ifndef BUILD_NO_DEBUG
+            if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+              addLog(LOG_LEVEL_DEBUG_MORE, concat(F("C008 : "), element.txt[x]));
+            }
 # endif // ifndef BUILD_NO_DEBUG
           }
         }
       }
-      Scheduler.scheduleNextDelayQueue(ESPEasy_Scheduler::IntervalTimer_e::TIMER_C008_DELAY_QUEUE, C008_DelayHandler->getNextScheduleTime());
+      Scheduler.scheduleNextDelayQueue(SchedulerIntervalTimer_e::TIMER_C008_DELAY_QUEUE, C008_DelayHandler->getNextScheduleTime());
       break;
     }
 
@@ -127,7 +145,8 @@ bool CPlugin_008(CPlugin::Function function, struct EventStruct *event, String& 
 
 // Uncrustify may change this into multi line, which will result in failed builds
 // *INDENT-OFF*
-bool do_process_c008_delay_queue(int controller_number, const C008_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
+bool do_process_c008_delay_queue(int controller_number, const Queue_element_base& element_base, ControllerSettingsStruct& ControllerSettings) {
+  const C008_queue_element& element = static_cast<const C008_queue_element&>(element_base);
 // *INDENT-ON*
   while (element.txt[element.valuesSent].isEmpty()) {
     // A non valid value, which we are not going to send.
@@ -141,7 +160,7 @@ bool do_process_c008_delay_queue(int controller_number, const C008_queue_element
   send_via_http(
     controller_number,
     ControllerSettings,
-    element.controller_idx,
+    element._controller_idx,
     element.txt[element.valuesSent],
     F("GET"),
     EMPTY_STRING,

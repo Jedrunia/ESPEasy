@@ -56,6 +56,15 @@ boolean Plugin_034(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_I2C_GET_ADDRESS
+    case PLUGIN_I2C_GET_ADDRESS:
+    {
+      event->Par1 = DHT12_I2C_ADDRESS;
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_I2C_GET_ADDRESS
+
     case PLUGIN_INIT:
     {
       success = true;
@@ -97,8 +106,8 @@ boolean Plugin_034(uint8_t function, struct EventStruct *event, String& string)
           if (dht_dat[3] & 0x80) { temperature = -temperature; }
           float humidity = float(dht_dat[0] * 10 + dht_dat[1]) / 10.0f;             // Humidity
 
-          UserVar[event->BaseVarIndex]     = temperature;
-          UserVar[event->BaseVarIndex + 1] = humidity;
+          UserVar.setFloat(event->TaskIndex, 0, temperature);
+          UserVar.setFloat(event->TaskIndex, 1, humidity);
           if (loglevelActiveFor(LOG_LEVEL_INFO)) {
             String log = F("DHT12: Temperature: ");
             log += formatUserVarNoCheck(event->TaskIndex, 0);
@@ -124,8 +133,8 @@ boolean Plugin_034(uint8_t function, struct EventStruct *event, String& string)
       if (!success)
       {
         addLog(LOG_LEVEL_INFO, F("DHT12: No reading!"));
-        UserVar[event->BaseVarIndex]     = NAN;
-        UserVar[event->BaseVarIndex + 1] = NAN;
+        UserVar.setFloat(event->TaskIndex, 0, NAN);
+        UserVar.setFloat(event->TaskIndex, 1, NAN);
       }
       break;
     }

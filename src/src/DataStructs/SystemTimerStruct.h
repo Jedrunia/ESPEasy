@@ -12,36 +12,76 @@ struct systemTimerStruct
 {
   systemTimerStruct() {}
 
-  int         Par1      = 0;
-  int         Par2      = 0;
-  int         Par3      = 0;
-  int         Par4      = 0;
-  int         Par5      = 0;
-  taskIndex_t TaskIndex = INVALID_TASK_INDEX;
+private:
 
+  int         _recurringCount    = 0;
+  int         _interval          = 0;
+  int         _timerIndex        = 0;
+  int         _remainder         = 0;
+  int         _loopCount         = 0;
+  int         _alternateInterval = 0;
+  taskIndex_t TaskIndex          = INVALID_TASK_INDEX;
+  bool        _alternateState    = false;
+
+public:
 
   // ***************
   // Rules Timer use
   // ***************
   systemTimerStruct(int           recurringCount,
                     unsigned long msecFromNow,
-                    unsigned int  timerIndex);
+                    unsigned int  timerIndex,
+                    int           alternateInterval = 0);
 
-  bool          isRecurring() const;
+  struct EventStruct toEvent() const;
+
+  void               fromEvent(taskIndex_t TaskIndex,
+                               int         Par1,
+                               int         Par2,
+                               int         Par3,
+                               int         Par4,
+                               int         Par5);
+
+  bool isRecurring() const {
+    return _recurringCount != 0;
+  }
 
   void          markNextRecurring();
 
-  unsigned long getInterval() const;
+  unsigned long getInterval() const {
+    return _alternateState ? _alternateInterval : _interval;
+  }
 
-  unsigned int  getTimerIndex() const;
+  unsigned int getTimerIndex() const {
+    return _timerIndex;
+  }
 
-  bool          isPaused() const;
+  bool isPaused() const {
+    return _remainder != 0;
+  }
 
-  int           getRemainder() const;
+  int getRemainder() const {
+    return _remainder;
+  }
 
-  void          setRemainder(int timeLeft);
+  void setRemainder(int timeLeft) {
+    _remainder = timeLeft;
+  }
 
-  int           getLoopCount() const;
+  int getLoopCount() const {
+    if (hasAlternateInterval()) { return _loopCount / 2; }
+    return _loopCount;
+  }
+
+  void toggleAlternateState();
+
+  bool isAlternateState() const {
+    return _alternateState;
+  }
+
+  bool hasAlternateInterval() const {
+    return _alternateInterval > 0;
+  }
 };
 
 

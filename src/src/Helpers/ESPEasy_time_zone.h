@@ -1,7 +1,7 @@
 #ifndef HELPERS_ESPEASY_TIME_ZONE_H
 #define HELPERS_ESPEASY_TIME_ZONE_H
 
-#include <Arduino.h>
+#include "../../ESPEasy_common.h"
 
 #include "../DataStructs/TimeChangeRule.h"
 
@@ -90,6 +90,12 @@ bool calcTimeChanges(int yr);
 * daylight time, as appropriate.                                        *
 *-----------------------------------------------------------------------*/
 uint32_t toLocal(uint32_t utc);
+
+/*----------------------------------------------------------------------*
+* Convert the given local time to UTC time, standard or                 *
+* daylight time, as appropriate.                                        *
+*-----------------------------------------------------------------------*/
+uint32_t fromLocal(uint32_t local);
 
 /*----------------------------------------------------------------------*
 * Determine whether the given UTC uint32_t is within the DST interval   *

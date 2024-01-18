@@ -52,7 +52,7 @@ String fileFromUrl(String path) {
 }
 
 bool matchFilename(const String& path, const __FlashStringHelper *fname) {
-  return path.equalsIgnoreCase(fileFromUrl(fname));
+  return fileFromUrl(path).equalsIgnoreCase(fileFromUrl(fname));
 }
 
 // ********************************************************************************
@@ -74,45 +74,63 @@ bool fileIsEmbedded(const String& path) {
   return false;
 }
 
-void do_serveEmbedded(const __FlashStringHelper* contentType, PGM_P content, bool serve_inline) {
+void do_serveEmbedded(const __FlashStringHelper* contentType, PGM_P content, int length, bool serve_inline) {
   // Serve using our own Web_StreamingBuffer
   // Serving via web_server.send_P may cause memory allocation issues when sending large flash strings.
   if (!serve_inline) {
-    TXBuffer.startStream(contentType, F("*"), 200);
+    const bool cacheable = true;
+    TXBuffer.startStream(contentType, F("*"), 200, cacheable);
   }
-  TXBuffer.addFlashString(content);
+  TXBuffer.addFlashString(content, length);
   if (!serve_inline) {
     TXBuffer.endStream();
   }
 }
 
-void serveEmbedded(const String& path, const __FlashStringHelper* contentType, bool serve_inline) {
+bool serveEmbedded(const String& path, const __FlashStringHelper* contentType, bool serve_inline) {
 #if defined(EMBED_ESPEASY_DEFAULT_MIN_CSS) || defined(WEBSERVER_EMBED_CUSTOM_CSS)
 
   if (matchFilename(path, F("esp.css"))) {
-    do_serveEmbedded(contentType, (PGM_P)FPSTR(DATA_ESPEASY_DEFAULT_MIN_CSS), serve_inline);
-    return;
+    #ifdef EMBED_ESPEASY_DEFAULT_MIN_CSS_USE_GZ
+    if (serve_inline) {
+      return false;
+    }
+    sendHeader(F("Content-Encoding"), F("gzip"));
+    do_serveEmbedded(contentType, (PGM_P)FPSTR(DATA_ESPEASY_DEFAULT_MIN_CSS_GZ), espeasy_default_min_css_gz_len, serve_inline);
+
+    #else
+    do_serveEmbedded(contentType, (PGM_P)FPSTR(DATA_ESPEASY_DEFAULT_MIN_CSS), -1, serve_inline);
+    #endif
+    return true;
   }
 #endif // if defined(EMBED_ESPEASY_DEFAULT_MIN_CSS) || defined(WEBSERVER_EMBED_CUSTOM_CSS)
 #ifdef WEBSERVER_FAVICON
 
   if (matchFilename(path, F("favicon.ico"))) {
-    do_serveEmbedded(contentType, (PGM_P)FPSTR(favicon_8b_ico), false);
-    return;
+    do_serveEmbedded(contentType, (PGM_P)FPSTR(favicon_8b_ico), favicon_8b_ico_len, false);
+    return true;
   }
 #endif // ifdef WEBSERVER_FAVICON
+  addLog(LOG_LEVEL_ERROR, concat(F("serveEmbedded failed: "), path));
+  return false;
 }
 
 
-void serve_CSS_inline() {
+bool serve_CSS_inline() {
+  #if defined(EMBED_ESPEASY_DEFAULT_MIN_CSS) || defined(WEBSERVER_EMBED_CUSTOM_CSS)
   const __FlashStringHelper* fname = F("esp.css");
   addHtml(F("<style>"));
+  bool res = true;
   if (fileExists(fname)) {
-    streamFromFS(fname);
+    res = streamFromFS(fname);
   } else {
-    serveEmbedded(fname, F("text/css"), true);
+    res = serveEmbedded(fname, F("text/css"), true);
   }
   addHtml(F("</style>"));
+  return res;
+  #else
+  return false;
+  #endif
 }
 
 // ********************************************************************************
@@ -143,9 +161,13 @@ bool isStaticFile_StripPrefix(String& path) {
 // and therefore should be read from browser cache
 // ********************************************************************************
 bool reply_304_not_modified(const String& path) {
+  if (path.endsWith(F("favicon.ico"))) {
+    // No need in serving 304 for the favicon
+    return true;
+  }
   const String ifNoneMatch = stripQuotes(web_server.header(F("If-None-Match")));
-  unsigned int etag_num    = 0;
-  bool res                 = false;
+  uint32_t etag_num = 0;
+  bool res          = false;
 
   if (validUIntFromString(ifNoneMatch, etag_num)) {
     if (fileExists(path) || fileIsEmbedded(path)) {
@@ -221,15 +243,13 @@ bool loadFromFS(String path) {
 #ifndef BUILD_NO_DEBUG
 
   if (static_file) {
-    addLog(LOG_LEVEL_INFO, concat(F("static_file: "), path));
+    addLog(LOG_LEVEL_INFO, strformat(
+      F("static_file: %s to: %s"), 
+      path.c_str(),
+      web_server.client().remoteIP().toString().c_str()
+      ));
   }
 #endif // ifndef BUILD_NO_DEBUG
-  const bool fileEmbedded = fileIsEmbedded(path);
-
-  if (!fileExists(path) && !fileEmbedded) {
-    return false;
-  }
-
 #ifdef WEBSERVER_CUSTOM
 
   if (path.endsWith(F(".esp"))) {
@@ -237,40 +257,52 @@ bool loadFromFS(String path) {
   }
 #endif // ifdef WEBSERVER_CUSTOM
 
+  const bool fileEmbedded = fileIsEmbedded(path);
+
+  if (!fileExists(path) && !fileEmbedded) {
+    return false;
+  }
+
   bool mustCheckCredentials = false;
   const __FlashStringHelper* contentType  = get_ContentType(path, mustCheckCredentials);
 
-  const bool serve_304 = static_file && reply_304_not_modified(path); // Reply with a 304 Not Modified
+  const bool serve_304 = static_file && 
+                         reply_304_not_modified(path); // Reply with a 304 Not Modified
 
 #ifndef BUILD_NO_DEBUG
 
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
-    String log = F("HTML : Request file ");
-    log += path;
-    addLogMove(LOG_LEVEL_DEBUG, log);
+    addLogMove(LOG_LEVEL_DEBUG, concat(F("HTML : Request file "), path));
   }
 #endif // ifndef BUILD_NO_DEBUG
 
   // prevent reloading stuff on every click
   if (static_file) {
-    sendHeader(F("Cache-Control"), F("public, max-age=31536000, immutable"));
+    sendHeader(F("Cache-Control"), F("public, max-age=31536000, s-maxage=31536000, immutable"));
 
     //    sendHeader(F("Cache-Control"), F("max-age=86400"));
-    sendHeader(F("Expires"),       F("-1"));
+//    sendHeader(F("Expires"),       F("-1"));
     if (fileEmbedded && !fileExists(path)) {
-      sendHeader(F("Last-Modified"), get_build_date_RFC1123());
+//      sendHeader(F("Last-Modified"), get_build_date_RFC1123());
     }
     sendHeader(F("Age"),           F("100"));
-    sendHeader(F("ETag"),          wrap_String(String(Cache.fileCacheClearMoment) + F("-a"), '"')); // added "-a" to the ETag to
-                                                                                                               // match the same encoding
+    sendHeader(F("ETag"),          strformat(F("\"%u-a\""), Cache.fileCacheClearMoment)); // added "-a" to the ETag to match the same encoding
   } else {
     sendHeader(F("Cache-Control"), F("no-cache"));
     sendHeader(F("ETag"),          F("\"2.0.0\""));
   }
-  sendHeader(F("Vary"), "*");
+  sendHeader(F("Vary"), "Accept-Encoding");
 
   if (path.endsWith(F(".dat"))) {
     sendHeader(F("Content-Disposition"), F("attachment;"));
+  }
+
+  if (!web_server.client().connected()) {
+    addLog(LOG_LEVEL_INFO, strformat(
+      F("loadFromFS: Client %s not connected"), 
+      web_server.client().remoteIP().toString().c_str()
+      ));
+    return false;
   }
 
   if (serve_304) {

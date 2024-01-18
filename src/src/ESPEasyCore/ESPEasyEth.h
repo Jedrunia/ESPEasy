@@ -11,7 +11,6 @@
 
 bool     ethUseStaticIP();
 void     ethSetupStaticIPconfig();
-void     ethSetDNS(const IPAddress& dns0, const IPAddress& dns1);
 bool     ethCheckSettings();
 bool     ethPrepare();
 void     ethPrintSettings();
@@ -20,6 +19,9 @@ bool     ETHConnected();
 void     ethPower(bool enable);
 void     ethResetGPIOpins();
 MAC_address ETHMacAddress();
+
+void removeEthEventHandler();
+void registerEthEventHandler();
 
 #endif // if FEATURE_ETHERNET
 #endif // ifndef ESPEASY_ETH_H

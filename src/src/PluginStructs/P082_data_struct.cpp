@@ -63,14 +63,13 @@ const __FlashStringHelper* toString(P082_DynamicModel model) {
   return F("");
 }
 
-P082_data_struct::P082_data_struct() : gps(nullptr), easySerial(nullptr) {}
-
-P082_data_struct::~P082_data_struct() {
-  powerDown();
-  reset();
+P082_data_struct::P082_data_struct() : gps(nullptr), easySerial(nullptr) {
+  for (size_t i = 0; i < static_cast<uint8_t>(P082_query::P082_NR_OUTPUT_OPTIONS); ++i) {
+    _cache[i] = 0.0f;
+  }
 }
 
-void P082_data_struct::reset() {
+P082_data_struct::~P082_data_struct() {
   if (gps != nullptr) {
     delete gps;
     gps = nullptr;
@@ -82,23 +81,47 @@ void P082_data_struct::reset() {
   }
 }
 
+/*
+void P082_data_struct::reset() {
+  if (gps != nullptr) {
+    delete gps;
+    gps = nullptr;
+  }
+
+  if (easySerial != nullptr) {
+    delete easySerial;
+    easySerial = nullptr;
+  }
+}
+*/
+
 bool P082_data_struct::init(ESPEasySerialPort port, const int16_t serial_rx, const int16_t serial_tx) {
   if (serial_rx < 0) {
     return false;
   }
-  reset();
+  if (gps != nullptr) {
+    delete gps;
+    gps = nullptr;
+  }
+
+  if (easySerial != nullptr) {
+    delete easySerial;
+    easySerial = nullptr;
+  }
+
+  # ifdef USE_SECOND_HEAP
+  HeapSelectDram ephemeral;
+  # endif // ifdef USE_SECOND_HEAP
+
+
   gps        = new (std::nothrow) TinyGPSPlus();
-  easySerial = new (std::nothrow) ESPeasySerial(port, serial_rx, serial_tx);
+  easySerial = new (std::nothrow) ESPeasySerial(port, serial_rx, serial_tx, false, 512);
 
   if (easySerial != nullptr) {
     easySerial->begin(9600);
     wakeUp();
   }
   return isInitialized();
-}
-
-bool P082_data_struct::isInitialized() const {
-  return gps != nullptr && easySerial != nullptr;
 }
 
 bool P082_data_struct::loop() {
@@ -228,7 +251,7 @@ bool P082_data_struct::storeCurPos(unsigned int maxAge_msec) {
 
 // Return the distance in meters compared to last stored position.
 // @retval  -1 when no fix.
-double P082_data_struct::distanceSinceLast(unsigned int maxAge_msec) {
+ESPEASY_RULES_FLOAT_TYPE P082_data_struct::distanceSinceLast(unsigned int maxAge_msec) {
   if (!hasFix(maxAge_msec)) {
     return -1.0;
   }
@@ -416,7 +439,7 @@ bool P082_data_struct::writeToGPS(const uint8_t* data, size_t size) {
 }
 
 # if FEATURE_PLUGIN_STATS
-bool P082_data_struct::webformLoad_show_stats(struct EventStruct *event, uint8_t var_index, P082_query query_type)
+bool P082_data_struct::webformLoad_show_stats(struct EventStruct *event, uint8_t var_index, P082_query query_type) const
 {
   bool somethingAdded = false;
 
@@ -428,30 +451,33 @@ bool P082_data_struct::webformLoad_show_stats(struct EventStruct *event, uint8_t
       somethingAdded = true;
     }
 
-    bool   show_custom = false;
-    double dist_p2p    = 0.0;
-    double dist_stddev = 0.0;
+    bool show_custom = false;
+    ESPEASY_RULES_FLOAT_TYPE dist_p2p{};
+    ESPEASY_RULES_FLOAT_TYPE dist_stddev{};
 
     if (gps != nullptr) {
       switch (query_type) {
         case P082_query::P082_QUERY_LAT:
           show_custom = true;
+
           // Compute distance between min and max peak
-          dist_p2p            = gps->distanceBetween(
+          dist_p2p = gps->distanceBetween(
             stats->getPeakLow(),  _last_lng,
             stats->getPeakHigh(), _last_lng);
-          dist_stddev         = gps->distanceBetween(
+          dist_stddev = gps->distanceBetween(
             _last_lat,                            _last_lng,
             _last_lat + stats->getSampleStdDev(), _last_lng);
           break;
         case P082_query::P082_QUERY_LONG:
           show_custom = true;
+
           // Compute distance between min and max peak
-          dist_p2p            = gps->distanceBetween(
+          dist_p2p = gps->distanceBetween(
             _last_lat, stats->getPeakLow(),
             _last_lat, stats->getPeakHigh());
+
           // Compute distance for std.dev
-          dist_stddev         = gps->distanceBetween(
+          dist_stddev = gps->distanceBetween(
             _last_lat, _last_lng,
             _last_lat, _last_lng + stats->getSampleStdDev());
           break;
@@ -497,7 +523,38 @@ bool P082_data_struct::webformLoad_show_stats(struct EventStruct *event, uint8_t
   return somethingAdded;
 }
 
-# endif // if FEATURE_PLUGIN_STATS
+#  if FEATURE_CHART_JS
+void P082_data_struct::webformLoad_show_position_scatterplot(struct EventStruct *event)
+{
+  taskVarIndex_t stats_long = INVALID_TASKVAR_INDEX;
+  taskVarIndex_t stats_lat  = INVALID_TASKVAR_INDEX;
 
+  for (uint8_t var_index = 0; var_index < P082_NR_OUTPUT_VALUES; ++var_index) {
+    const uint8_t pconfigIndex = var_index + P082_QUERY1_CONFIG_POS;
+    const P082_query query     = static_cast<P082_query>(PCONFIG(pconfigIndex));
 
-#endif // ifdef USES_P082
+    switch (query) {
+      case P082_query::P082_QUERY_LONG:
+        stats_long = var_index;
+        break;
+      case P082_query::P082_QUERY_LAT:
+        stats_lat = var_index;
+        break;
+      default:
+        break;
+    }
+  }
+
+  plot_ChartJS_scatter(
+    stats_long,
+    stats_lat,
+    F("positionscatter"),
+    { F("Position Scatter Plot") },
+    { F("Coordinates"), F("rgb(255, 99, 132)") },
+    500,
+    500);
+}
+
+#  endif // if FEATURE_CHART_JS
+# endif  // if FEATURE_PLUGIN_STATS
+#endif   // ifdef USES_P082

@@ -1,7 +1,5 @@
 #include "../Helpers/StringParser.h"
 
-#include "../../ESPEasy_common.h"
-
 #include "../../_Plugin_Helper.h"
 
 #include "../Commands/GPIO.h"
@@ -12,17 +10,18 @@
 
 #include "../Globals/Cache.h"
 #include "../Globals/Plugins_other.h"
+#include "../Globals/RulesCalculate.h"
 #include "../Globals/RuntimeData.h"
 
+#include "../Helpers/_CPlugin_init.h"
 #include "../Helpers/ESPEasy_math.h"
 #include "../Helpers/ESPEasy_Storage.h"
 #include "../Helpers/Misc.h"
 #include "../Helpers/Numerical.h"
-#include "../Helpers/Rules_calculate.h"
 #include "../Helpers/StringConverter.h"
 #include "../Helpers/StringGenerator_GPIO.h"
 
-#include <Arduino.h>
+
 
 /********************************************************************************************\
    Parse string template
@@ -50,11 +49,9 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
   START_TIMER;
 
   // Keep current loaded taskSettings to restore at the end.
-  uint8_t   currentTaskIndex = ExtraTaskSettings.TaskIndex;
+  const taskIndex_t currentTaskIndex = ExtraTaskSettings.TaskIndex;
   String newString;
-
   newString.reserve(minimal_lineSize); // Our best guess of the new size.
-
 
   if (parseTemplate_CallBack_ptr != nullptr) {
     parseTemplate_CallBack_ptr(tmpString, useURLencode);
@@ -73,15 +70,15 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
       newString += tmpString.substring(lastStartpos, startpos);
 
       // deviceName is lower case, so we can compare literal string (no need for equalsIgnoreCase)
-      const bool devNameEqInt = deviceName.equals(F("int"));
-      if (devNameEqInt || deviceName.equals(F("var")))
+      const bool devNameEqInt = equals(deviceName, F("int"));
+      if (devNameEqInt || equals(deviceName, F("var")))
       {
         // Address an internal variable either as float or as int
         // For example: Let,10,[VAR#9]
-        unsigned int varNum;
+        uint32_t varNum;
 
         if (validUIntFromString(valueName, varNum)) {
-          unsigned char nr_decimals = maxNrDecimals_double(getCustomFloatVar(varNum));
+          unsigned char nr_decimals = maxNrDecimals_fpType(getCustomFloatVar(varNum));
           bool trimTrailingZeros    = true;
 
           if (devNameEqInt) {
@@ -91,7 +88,11 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
             // There is some formatting here, so do not throw away decimals
             trimTrailingZeros = false;
           }
+          #if FEATURE_USE_DOUBLE_AS_ESPEASY_RULES_FLOAT_TYPE
           String value = doubleToString(getCustomFloatVar(varNum), nr_decimals, trimTrailingZeros);
+          #else
+          String value = floatToString(getCustomFloatVar(varNum), nr_decimals, trimTrailingZeros);
+          #endif
           transformValue(
             newString, 
             minimal_lineSize, 
@@ -100,16 +101,12 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
             tmpString);
         }
       }
-      else if (deviceName.equals(F("plugin")))
+      else if (equals(deviceName, F("plugin")))
       {
         // Handle a plugin request.
         // For example: "[Plugin#GPIO#Pinstate#N]"
         // The command is stored in valueName & format
-        String command;
-        command.reserve(valueName.length() + format.length() + 1);
-        command  = valueName;
-        command += '#';
-        command += format;
+        String command = strformat(F("%s#%s"), valueName.c_str(), format.c_str());
         command.replace('#', ',');
 
         if (getGPIOPinStateValues(command)) {
@@ -130,28 +127,63 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
         // For example: "[bme#temp]"
         // If value name is unknown, run a PLUGIN_GET_CONFIG_VALUE command.
         // For example: "[<taskname>#getLevel]"
-        taskIndex_t taskIndex = findTaskIndexByName(deviceName);
+        taskIndex_t taskIndex = findTaskIndexByName(deviceName, true); // Check for enabled/disabled is done separately
 
-        if (validTaskIndex(taskIndex) && Settings.TaskDeviceEnabled[taskIndex]) {
-          uint8_t valueNr = findDeviceValueIndexByName(valueName, taskIndex);
+        if (validTaskIndex(taskIndex)) {
+          bool isHandled = false;
+          if (Settings.TaskDeviceEnabled[taskIndex]) {
+            uint8_t valueNr = findDeviceValueIndexByName(valueName, taskIndex);
 
-          if (valueNr != VARS_PER_TASK) {
-            // here we know the task and value, so find the uservar
-            // Try to format and transform the values
-            bool   isvalid;
-            String value = formatUserVar(taskIndex, valueNr, isvalid);
+            if (valueNr != VARS_PER_TASK) {
+              // here we know the task and value, so find the uservar
+              // Try to format and transform the values
+              bool   isvalid;
+              String value = formatUserVar(taskIndex, valueNr, isvalid);
 
-            if (isvalid) {
-              transformValue(newString, minimal_lineSize, std::move(value), format, tmpString);
+              if (isvalid) {
+                transformValue(newString, minimal_lineSize, std::move(value), format, tmpString);
+                isHandled = true;
+              }
+            } else {
+              // try if this is a get config request
+              struct EventStruct TempEvent(taskIndex);
+              String tmpName = valueName;
+
+              if (PluginCall(PLUGIN_GET_CONFIG_VALUE, &TempEvent, tmpName))
+              {
+                transformValue(newString, minimal_lineSize, std::move(tmpName), format, tmpString);
+                isHandled = true;
+              }
             }
-          } else {
-            // try if this is a get config request
-            struct EventStruct TempEvent(taskIndex);
-            String tmpName = valueName;
+          }
+          if (!isHandled && valueName.startsWith(F("settings."))) {  // Task settings values
+            String value;
+            if (valueName.endsWith(F(".enabled"))) {           // Task state
+              value = Settings.TaskDeviceEnabled[taskIndex] ? '1' : '0';
+            } else if (valueName.endsWith(F(".interval"))) {   // Task interval
+              value = Settings.TaskDeviceTimer[taskIndex];
+            } else if (valueName.endsWith(F(".valuecount"))) { // Task value count
+              value = getValueCountForTask(taskIndex);
+            } else if ((valueName.indexOf(F(".controller")) == 8) && valueName.length() >= 20) { // Task controller values
+              String ctrl = valueName.substring(19, 20);
+              int32_t ctrlNr = 0;
+              if (validIntFromString(ctrl, ctrlNr) && (ctrlNr >= 1) && (ctrlNr <= CONTROLLER_MAX) && 
+                  Settings.ControllerEnabled[ctrlNr - 1]) { // Controller nr. valid and enabled
+                if (valueName.endsWith(F(".enabled"))) {    // Task-controller enabled
+                  value = Settings.TaskDeviceSendData[ctrlNr - 1][taskIndex];
+                } else if (valueName.endsWith(F(".idx"))) { // Task-controller idx value
+                  protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(ctrlNr - 1);
 
-            if (PluginCall(PLUGIN_GET_CONFIG_VALUE, &TempEvent, tmpName))
-            {
-              transformValue(newString, minimal_lineSize, std::move(tmpName), format, tmpString);
+                  if (validProtocolIndex(ProtocolIndex) && 
+                      getProtocolStruct(ProtocolIndex).usesID && (Settings.Protocol[ctrlNr - 1] != 0)) {
+                    value = Settings.TaskDeviceID[ctrlNr - 1][taskIndex];
+                  }
+                }
+              }
+            }
+            if (!value.isEmpty()) {
+              transformValue(newString, minimal_lineSize, std::move(value), format, tmpString);
+              // isHandled = true;
             }
           }
         }
@@ -175,7 +207,7 @@ String parseTemplate_padded(String& tmpString, uint8_t minimal_lineSize, bool us
   #endif // ifndef BUILD_NO_RAM_TRACKER
 
   // Restore previous loaded taskSettings
-  if (currentTaskIndex != 255)
+  if (validTaskIndex(currentTaskIndex))
   {
     LoadTaskSettings(currentTaskIndex);
   }
@@ -298,7 +330,7 @@ void transformValue(
     if (valueFormat.length() > 0) // do the checks only if a Format is defined to optimize loop
     {
       int logicVal    = 0;
-      double valFloat = 0.0;
+      ESPEASY_RULES_FLOAT_TYPE valFloat{};
 
       if (validDoubleFromString(value, valFloat))
       {
@@ -348,7 +380,7 @@ void transformValue(
                 maskChar = tempValueFormat[1];
               }
 
-              if (value.equals(F("0"))) {
+              if (equals(value, '0')) {
                 value = String();
               } else {
                 const int valueLength = value.length();
@@ -394,7 +426,11 @@ void transformValue(
                   break;
               }
               bool trimTrailingZeros = false;
+#if FEATURE_USE_DOUBLE_AS_ESPEASY_RULES_FLOAT_TYPE
               value = doubleToString(valFloat, y, trimTrailingZeros);
+#else
+              value = floatToString(valFloat, y, trimTrailingZeros);
+#endif
               int indexDot = value.indexOf('.');
 
               if (indexDot == -1) {
@@ -407,10 +443,18 @@ void transformValue(
               break;
             }
             case 'F': // FLOOR (round down)
+            #if FEATURE_USE_DOUBLE_AS_ESPEASY_RULES_FLOAT_TYPE
               value = static_cast<int>(floor(valFloat));
+            #else
+              value = static_cast<int>(floorf(valFloat));
+            #endif
               break;
             case 'E': // CEILING (round up)
+            #if FEATURE_USE_DOUBLE_AS_ESPEASY_RULES_FLOAT_TYPE
               value = static_cast<int>(ceil(valFloat));
+            #else
+              value = static_cast<int>(ceilf(valFloat));
+            #endif
               break;
             default:
               value = F("ERR");
@@ -561,16 +605,11 @@ void transformValue(
 
 // Find the first (enabled) task with given name
 // Return INVALID_TASK_INDEX when not found, else return taskIndex
-taskIndex_t findTaskIndexByName(const String& deviceName, bool allowDisabled)
+taskIndex_t findTaskIndexByName(String deviceName, bool allowDisabled)
 {
+  deviceName.toLowerCase();
   // cache this, since LoadTaskSettings does take some time.
-  #ifdef USE_SECOND_HEAP
-  HeapSelectDram ephemeral;
-  auto result = Cache.taskIndexName.find(String(deviceName));
-  #else
   auto result = Cache.taskIndexName.find(deviceName);
-  #endif
-
 
   if (result != Cache.taskIndexName.end()) {
     return result->second;
@@ -586,11 +625,7 @@ taskIndex_t findTaskIndexByName(const String& deviceName, bool allowDisabled)
         // Use entered taskDeviceName can have any case, so compare case insensitive.
         if (deviceName.equalsIgnoreCase(taskDeviceName))
         {
-          #ifdef USE_SECOND_HEAP
-          Cache.taskIndexName[String(deviceName)] = taskIndex;
-          #else
           Cache.taskIndexName[deviceName] = taskIndex;
-          #endif
           return taskIndex;
         }
       }
@@ -615,14 +650,12 @@ uint8_t findDeviceValueIndexByName(const String& valueName, taskIndex_t taskInde
   // cache this, since LoadTaskSettings does take some time.
   // We need to use a cache search key including the taskIndex,
   // to allow several tasks to have the same value names.
-  String cache_valueName;
-
-  cache_valueName.reserve(valueName.length() + 4);
-  cache_valueName  = valueName;
-  cache_valueName += '#';        // The '#' cannot exist in a value name, use it in the cache key.
-  cache_valueName += taskIndex;
-  cache_valueName.toLowerCase(); // No need to store multiple versions of the same entry with only different case.
-
+  String cache_valueName = strformat(
+    F("%s#%d"),                   // The '#' cannot exist in a value name, use it in the cache key.
+    valueName.c_str(),
+    static_cast<int>(taskIndex));
+  cache_valueName.toLowerCase();  // No need to store multiple versions of the same entry with only different case.
+  
   auto result = Cache.taskIndexValueName.find(cache_valueName);
 
   if (result != Cache.taskIndexValueName.end()) {
@@ -681,14 +714,15 @@ bool findNextDevValNameInString(const String& input, int& startpos, int& endpos,
   int hashpos;
 
   if (!findNextValMarkInString(input, startpos, hashpos, endpos)) { return false; }
-  deviceName = input.substring(startpos + 1, hashpos);
-  valueName  = input.substring(hashpos + 1, endpos);
-  hashpos    = valueName.indexOf('#');
+
+  move_special(deviceName, input.substring(startpos + 1, hashpos));
+  move_special(valueName , input.substring(hashpos + 1, endpos));
+  hashpos = valueName.indexOf('#');
 
   if (hashpos != -1) {
     // Found an extra '#' in the valueName, will split valueName and format.
-    format    = valueName.substring(hashpos + 1);
-    valueName = valueName.substring(0, hashpos);
+    move_special(format,    valueName.substring(hashpos + 1));
+    move_special(valueName, valueName.substring(0, hashpos));
   } else {
     format = String();
   }
@@ -715,7 +749,8 @@ taskIndex_t parseCommandArgumentTaskIndex(const String& string, unsigned int arg
 /********************************************************************************************\
    Get int from command argument (argc = 0 => command)
  \*********************************************************************************************/
-int parseCommandArgumentInt(const String& string, unsigned int argc)
+int parseCommandArgumentInt(const String& string, unsigned int argc,
+                            int errorValue)
 {
   int value = 0;
 
@@ -724,7 +759,7 @@ int parseCommandArgumentInt(const String& string, unsigned int argc)
     String TmpStr;
 
     if (GetArgv(string.c_str(), TmpStr, argc + 1)) {
-      value = CalculateParam(TmpStr);
+      value = CalculateParam(TmpStr, errorValue);
     }
   }
   return value;

@@ -73,11 +73,11 @@ void DLBus::attachDLBusInterrupt(void)
 
 void DLBus::StartReceiving(void)
 {
-  noInterrupts(); // make sure we don't get interrupted before we are ready
+  ISR_noInterrupts(); // make sure we don't get interrupted before we are ready
   ISR_PulseCount      = 0;
   ISR_Receiving       = (ISR_PtrChangeBitStream != nullptr);
   ISR_AllBitsReceived = false;
-  interrupts(); // interrupts allowed now, next instruction WILL be executed
+  ISR_interrupts(); // interrupts allowed now, next instruction WILL be executed
 }
 
 void IRAM_ATTR DLBus::ISR(void)
@@ -292,13 +292,11 @@ boolean DLBus::Processing(void) {
 
 # ifndef P092_LIMIT_BUILD_SIZE
       if (IsLogLevelInfo) {
-        String  log  = F("# Required bits: ");
-        log += RequiredBitStreamLength;
-        log += F(" StartBit: ");
-        log += StartBit;
-        log += F(" / EndBit: ");
-        log += BitNumber;
-        AddToInfoLog(log);
+        AddToInfoLog(strformat(
+          F("# Required bits: %d StartBit: %d / EndBit: %d"), 
+          RequiredBitStreamLength, 
+          StartBit, 
+          BitNumber));
       }
 #endif // ifndef P092_LIMIT_BUILD_SIZE
       return false;
@@ -307,11 +305,9 @@ boolean DLBus::Processing(void) {
 
 # ifndef P092_LIMIT_BUILD_SIZE
   if (IsLogLevelInfo) {
-    String  log  = F("StartBit: ");
-    log += StartBit;
-    log += F(" / EndBit: ");
-    log += BitNumber;
-    AddToInfoLog(log);
+    AddToInfoLog(strformat(
+      F("StartBit: %d / EndBit: %d"),
+       StartBit, BitNumber));
   }
 #endif // ifndef P092_LIMIT_BUILD_SIZE
   Trim(StartBit);      // remove start and stop bits
@@ -443,11 +439,10 @@ boolean DLBus::CheckCRC(uint8_t IdxCRC) {
 
 # ifndef P092_LIMIT_BUILD_SIZE
   if (IsLogLevelInfo) {
-    String log = F("# Calculated CRC: 0x");
-    log += String(dataSum, HEX);
-    log += F(" Received: 0x");
-    log += String(ByteStream[IdxCRC], HEX);
-    AddToInfoLog(log);
+    AddToInfoLog(strformat(
+      F("# Calculated CRC: 0x%x Received: 0x%x"), 
+      dataSum, 
+      ByteStream[IdxCRC]));
   }
 #endif // ifndef P092_LIMIT_BUILD_SIZE
   return false;
@@ -467,8 +462,6 @@ boolean DLBus::CheckCRC(uint8_t IdxCRC) {
 # define DLbus_RSM_LOWER           0b10
 # define DLbus_RSM_STANDBY         0b11
 
-
-P092_data_struct::P092_data_struct() {}
 
 P092_data_struct::~P092_data_struct() {
   if (DLbus_Data != nullptr) {
