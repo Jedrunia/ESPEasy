@@ -6,6 +6,9 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-07-09 tonhuisman: Set default Value Type and UoM when changing a task value setting
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported yet for SysInfo)
  * 2023-09-24 tonhuisman: Add support for getting all values via Get Config option [<taskname>#<valuename>] where <valuename> is the default
  *                        name as set for an output value. None is ignored. Not available in MINIMAL_OTA builds.
  *                        Move all includes to P026_data_struct.h
@@ -23,7 +26,6 @@
 # include "src/PluginStructs/P026_data_struct.h" // Arduino doesn't do #if in .ino sources :(
 
 
-
 boolean Plugin_026(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
@@ -32,14 +34,18 @@ boolean Plugin_026(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number       = PLUGIN_ID_026;
-      Device[deviceCount].VType          = Sensor_VType::SENSOR_TYPE_QUAD;
-      Device[deviceCount].ValueCount     = 4;
-      Device[deviceCount].SendDataOption = true;
-      Device[deviceCount].TimerOption    = true;
-      Device[deviceCount].FormulaOption  = true;
-      Device[deviceCount].OutputDataType = Output_Data_type_t::Simple;
-      Device[deviceCount].PluginStats    = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_026;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_QUAD;
+      dev.ValueCount     = 4;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.FormulaOption  = true;
+      dev.OutputDataType = Output_Data_type_t::Simple;
+      dev.PluginStats    = true;
+      dev.CustomVTypeVar = true;
+      dev.MqttStateClass = true;
+      dev.NoDeviceSettings = true;
       break;
     }
 
@@ -70,10 +76,29 @@ boolean Plugin_026(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+
 
     case PLUGIN_SET_DEFAULTS:
     {
-      PCONFIG(0) = 0;    // "Uptime"
+      PCONFIG(0) = 0; // "Uptime"
+      # if FEATURE_MQTT_DISCOVER && FEATURE_CUSTOM_TASKVAR_VTYPE
+      ExtraTaskSettings.setTaskVarCustomVType(0, static_cast<uint8_t>(Sensor_VType::SENSOR_TYPE_DURATION));
+      # endif // if FEATURE_MQTT_DISCOVER && FEATURE_CUSTOM_TASKVAR_VTYPE
 
       for (uint8_t i = 1; i < VARS_PER_TASK; ++i) {
         PCONFIG(i) = 11; // "None"
@@ -128,6 +153,5 @@ boolean Plugin_026(uint8_t function, struct EventStruct *event, String& string)
   }
   return success;
 }
-
 
 #endif // USES_P026

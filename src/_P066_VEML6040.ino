@@ -11,6 +11,10 @@
 // Datasheet: https://www.vishay.com/docs/84276/veml6040.pdf
 // Application Note: www.vishay.com/doc?84331
 
+/** Changelog:
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported yet for RGBW sensors)
+ */
 
 # define PLUGIN_066
 # define PLUGIN_ID_066         66
@@ -32,19 +36,16 @@ boolean Plugin_066(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_066;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_QUAD;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 4;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = false;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_066;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_QUAD;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 4;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
+      dev.CustomVTypeVar = true;
       break;
     }
 
@@ -62,6 +63,22 @@ boolean Plugin_066(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[3], PSTR(PLUGIN_VALUENAME4_066));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -88,21 +105,31 @@ boolean Plugin_066(uint8_t function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_LOAD:
     {
       {
-        const __FlashStringHelper *optionsMode[6] = { F("40ms (16496)"), F("80ms (8248)"), F("160ms (4124)"), F("320ms (2062)"), F(
-                                                        "640ms (1031)"),                                             F(
-                                                        "1280ms (515)") };
-        addFormSelector(F("Integration Time (Max Lux)"), F("itime"), 6, optionsMode, nullptr, PCONFIG(1));
+        const __FlashStringHelper *optionsMode[] = {
+          F("40ms (16496)"),
+          F("80ms (8248)"),
+          F("160ms (4124)"),
+          F("320ms (2062)"),
+          F("640ms (1031)"),
+          F("1280ms (515)"),
+        };
+        constexpr size_t optionCount = NR_ELEMENTS(optionsMode);
+        const FormSelectorOptions selector(optionCount, optionsMode);
+        selector.addFormSelector(F("Integration Time (Max Lux)"), F("itime"), PCONFIG(1));
       }
 
       {
-        const __FlashStringHelper *optionsVarMap[6] = {
+        const __FlashStringHelper *optionsVarMap[] = {
           F("R, G, B, W"),
           F("r, g, b, W - relative rgb [&#37;]"),
           F("r, g, b, W - relative rgb^Gamma [&#37;]"),
           F("R, G, B, Color Temperature [K]"),
           F("R, G, B, Ambient Light [Lux]"),
-          F("Color Temperature [K], Ambient Light [Lux], Y, W") };
-        addFormSelector(F("Value Mapping"), F("map"), 6, optionsVarMap, nullptr, PCONFIG(2));
+          F("Color Temperature [K], Ambient Light [Lux], Y, W"),
+        };
+        constexpr size_t optionCount = NR_ELEMENTS(optionsVarMap);
+        const FormSelectorOptions selector(optionCount, optionsVarMap);
+        selector.addFormSelector(F("Value Mapping"), F("map"), PCONFIG(2));
       }
 
       success = true;

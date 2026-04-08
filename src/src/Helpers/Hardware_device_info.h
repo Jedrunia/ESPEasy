@@ -30,7 +30,6 @@ int32_t getPartitionInfo(ESP8266_partition_type ptype, uint32_t& address, int32_
 // had to rename the function to isFlashInterfacePin_ESPEasy
 bool isFlashInterfacePin_ESPEasy(int gpio);
 
-
 uint32_t                   getFlashChipId();
 
 uint32_t                   getFlashRealSizeInBytes();
@@ -51,6 +50,8 @@ struct esp32_chip_features {
 
 esp32_chip_features        getChipFeatures();
 String                     getChipFeaturesString();
+
+bool                      flashVddPinCanBeUsedAsGPIO();
 
 int32_t                   getEmbeddedFlashSize();
 int32_t                   getEmbeddedPSRAMSize();
@@ -75,15 +76,59 @@ uint8_t                    getChipCores();
 
 const __FlashStringHelper* getChipModel();
 
+#ifdef ESP32
+const __FlashStringHelper* getChipModel(
+  uint32_t chip_model, 
+  uint32_t chip_revision, 
+  uint32_t pkg_version, 
+  bool single_core);
+#endif
+
+
 bool                       isESP8285(uint32_t& pkg_version, bool& high_temp_version);
 bool                       isESP8285();
 
+uint16_t                   getChipRevision_val();
 String                     getChipRevision();
 
 uint32_t                   getSketchSize();
 
 uint32_t                   getFreeSketchSpace();
 
+
+/********************************************************************************************\
+   I2C support
+ \*********************************************************************************************/
+constexpr uint8_t          getI2CBusCount() {
+#if FEATURE_I2C_MULTIPLE
+  // Not querying the supported nr. of I2C busses in hardware, but using software multiplexing
+  // Assume/expect IDF 5.x
+  // FIXME TD-er: Maybe we should look at SOC_HP_I2C_NUM ????
+  // # if defined(SOC_I2C_SUPPORTED) && SOC_I2C_SUPPORTED
+  #  if FEATURE_I2C_INTERFACE_3
+  return 3u; // SOC_I2C_NUM; // Let's go for all I2C busses, including LP_I2C (low power, where available)
+  #  else // if FEATURE_I2C_INTERFACE_3
+  return 2u; // SOC_I2C_NUM; // Let's go for all I2C busses, including LP_I2C (low power, where available)
+  #  endif // if FEATURE_I2C_INTERFACE_3
+  // #else
+  // return 0u;
+  // # endif // if defined(SOC_I2C_SUPPORTED) && SOC_I2C_SUPPORTED
+#else
+  return 1u;
+#endif
+}
+
+// Get the number of usable SPI buses
+constexpr uint8_t getSPIBusCount() {
+#if SOC_SPI_PERIPH_NUM > 3
+  static_assert(false, "Implement processor architecture");
+  return 2u;
+#elif SOC_SPI_PERIPH_NUM > 2
+  return 2u;
+#else
+  return 1u;
+#endif
+}
 
 /********************************************************************************************\
    PSRAM support

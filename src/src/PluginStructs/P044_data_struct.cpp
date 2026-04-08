@@ -3,7 +3,7 @@
 #ifdef USES_P044_ORG
 
 # include "../ESPEasyCore/Serial.h"
-# include "../ESPEasyCore/ESPEasyNetwork.h"
+# include "../../ESPEasy/net/ESPEasyNetwork.h"
 
 # include "../Globals/EventQueue.h"
 
@@ -50,7 +50,7 @@ void P044_Task::startServer(uint16_t portnumber) {
   gatewayPort     = portnumber;
   P1GatewayServer = new (std::nothrow) WiFiServer(portnumber);
 
-  if ((nullptr != P1GatewayServer) && NetworkConnected()) {
+  if ((nullptr != P1GatewayServer) && ESPEasy::net::NetworkConnected()) {
     P1GatewayServer->begin();
 
     if (serverActive(P1GatewayServer)) {
@@ -64,7 +64,7 @@ void P044_Task::startServer(uint16_t portnumber) {
 }
 
 void P044_Task::checkServer() {
-  if ((nullptr != P1GatewayServer) && !serverActive(P1GatewayServer) && NetworkConnected()) {
+  if ((nullptr != P1GatewayServer) && !serverActive(P1GatewayServer) && ESPEasy::net::NetworkConnected()) {
     P1GatewayServer->close();
     P1GatewayServer->begin();
 
@@ -154,7 +154,7 @@ void P044_Task::clearBuffer() {
     maxMessageSize = _min(serial_buffer.length(), P044_DATAGRAM_MAX_SIZE);
   }
 
-  serial_buffer = String();
+  free_string(serial_buffer);
   serial_buffer.reserve(maxMessageSize);
 }
 
@@ -299,7 +299,7 @@ void P044_Task::handleSerialIn(struct EventStruct *event) {
 
   if (done) {
     P1GatewayClient.print(serial_buffer);
-    P1GatewayClient.flush();
+    P1GatewayClient.PR_9453_FLUSH_TO_CLEAR();
     # ifndef BUILD_NO_DEBUG
     addLog(LOG_LEVEL_DEBUG, F("P1   : data send!"));
     # endif // ifndef BUILD_NO_DEBUG

@@ -1,12 +1,11 @@
 #include "../WebServer/UploadPage.h"
 
 #include "../WebServer/ESPEasy_WebServer.h"
-#include "../WebServer/AccessControl.h"
 #include "../WebServer/Markup_Buttons.h"
 #include "../WebServer/HTML_wrappers.h"
 
-#include "../Globals/Cache.h"
 #include "../Helpers/ESPEasy_Storage.h"
+#include "../Helpers/StringConverter.h"
 #if FEATURE_TARSTREAM_SUPPORT
 # include "../Helpers/TarStream.h"
 #endif // if FEATURE_TARSTREAM_SUPPORT
@@ -35,7 +34,7 @@ void handle_upload() {
             "<form enctype='multipart/form-data' method='post'><p>Upload settings file:<br><input type='file' name='datafile' size='40'></p><div><input class='button link' type='submit' value='Upload'></div><input type='hidden' name='edit' value='1'></form>"));
   sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
-  printWebString = String();
+  free_string(printWebString);
   printToWeb     = false;
 }
 
@@ -87,7 +86,7 @@ void handle_upload_post() {
   addHtml(F("Upload finished"));
   sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
-  printWebString = String();
+  free_string(printWebString);
   printToWeb     = false;
 }
 
@@ -151,9 +150,11 @@ void handleFileUploadBase(bool toSDcard) {
 
   if (upload.status == UPLOAD_FILE_START)
   {
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       addLogMove(LOG_LEVEL_INFO, concat(F("Upload: START, filename: "), upload.filename));
     }
+#endif
     valid        = false;
     uploadResult = uploadResult_e::UploadStarted;
   }
@@ -174,7 +175,12 @@ void handleFileUploadBase(bool toSDcard) {
         # if FEATURE_TARSTREAM_SUPPORT
 
         if ((upload.filename.length() > 3) && upload.filename.substring(upload.filename.length() - 4).equalsIgnoreCase(F(".tar"))) {
-          tarStream = new (std::nothrow) TarStream(upload.filename, destination);
+          constexpr unsigned size = sizeof(TarStream);
+          void *ptr               = special_calloc(1, size);
+    
+          if (ptr != nullptr) {  
+            tarStream = new (ptr) TarStream(upload.filename, destination);
+          }
           #  ifndef BUILD_NO_DEBUG
 
           if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -202,10 +208,11 @@ void handleFileUploadBase(bool toSDcard) {
     {
       if (uploadFile) { uploadFile.write(upload.buf, upload.currentSize); }
     }
-
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       addLogMove(LOG_LEVEL_INFO, concat(F("Upload: WRITE, Bytes: "), upload.currentSize));
     }
+#endif
   }
   else if (upload.status == UPLOAD_FILE_END)
   {
@@ -237,10 +244,11 @@ void handleFileUploadBase(bool toSDcard) {
     {
       if (uploadFile) { uploadFile.close(); }
     }
-
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       addLogMove(LOG_LEVEL_INFO, concat(F("Upload: END, Size: "), upload.totalSize));
     }
+#endif
   }
 
   if (valid) {

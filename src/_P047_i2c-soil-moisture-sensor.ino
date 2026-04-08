@@ -12,6 +12,10 @@
 //
 
 /** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ * 2024-05-09 tonhuisman: Add support for BeFlE v3.x (low power) Moisture sensor
+ *                        Code improvements
+ *                        ** Fix bug in setting a new I2C address for BeFlE sensors (needs a left-shift by 1)
  * 2024-04-05 tonhuisman: Complete implementation for Afafruit I2C Capacitive Moisture sensor.
  *                        Log sensor name and version (or 0 when not available) at plugin startup.
  * 2024-03-23 tonhuisman: Start implementation of Adafruit I2C Capacitive Moisture Sensor (product ID 4026)
@@ -43,18 +47,15 @@ boolean Plugin_047(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_047;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_TRIPLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 3;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_047;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_TRIPLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 3;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -86,6 +87,20 @@ boolean Plugin_047(uint8_t function, struct EventStruct *event, String& string)
       success           = true;
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_TEMP_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_MOISTURE_ONLY);
+
+      if (3 == event->Par5) {
+        event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_LUX_ONLY);
+      }
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_SET_DEFAULTS:
     {
@@ -133,6 +148,9 @@ boolean Plugin_047(uint8_t function, struct EventStruct *event, String& string)
         const __FlashStringHelper *SensorModels[] = {
           toString(P047_MODEL_CATNIP),
           toString(P047_MODEL_BEFLE),
+          # if P047_FEATURE_BEFLE_V3
+          toString(P047_MODEL_BEFLE_V3),
+          # endif // if P047_FEATURE_BEFLE_V3
           # if P047_FEATURE_ADAFRUIT
           toString(P047_MODEL_ADAFRUIT),
           # endif // if P047_FEATURE_ADAFRUIT
@@ -140,21 +158,37 @@ boolean Plugin_047(uint8_t function, struct EventStruct *event, String& string)
         const int SensorModelIds[] = {
           static_cast<int>(P047_MODEL_CATNIP),
           static_cast<int>(P047_MODEL_BEFLE),
+          # if P047_FEATURE_BEFLE_V3
+          static_cast<int>(P047_MODEL_BEFLE_V3),
+          # endif // if P047_FEATURE_BEFLE_V3
           # if P047_FEATURE_ADAFRUIT
           static_cast<int>(P047_MODEL_ADAFRUIT),
           # endif // if P047_FEATURE_ADAFRUIT
         };
         constexpr size_t P047_MODEL_OPTIONS = NR_ELEMENTS(SensorModelIds);
-        addFormSelector(F("Sensor model"), F("model"), P047_MODEL_OPTIONS, SensorModels, SensorModelIds, P047_MODEL, true);
-        addFormNote(F("Changing the Sensor model will reload the page."));
+        FormSelectorOptions selector( P047_MODEL_OPTIONS, SensorModels, SensorModelIds);
+        selector.default_index = static_cast<int>(P047_MODEL_CATNIP);
+        selector.reloadonchange = true;
+        selector.addFormSelector(F("Sensor model"), F("model"), P047_MODEL);
+        // addFormNote(F("Changing the Sensor model will reload the page."));
       }
 
-      if (P047_MODEL_CATNIP == static_cast<P047_SensorModels>(P047_MODEL)) {
+      if ((P047_MODEL_CATNIP == static_cast<P047_SensorModels>(P047_MODEL))
+          # if P047_FEATURE_BEFLE_V3
+          || (P047_MODEL_BEFLE_V3 == static_cast<P047_SensorModels>(P047_MODEL))
+          # endif // if P047_FEATURE_BEFLE_V3
+          ) {
         addFormSeparator(2);
 
-        addFormCheckBox(F("Send sensor to sleep"), F("sleep"),   P047_SENSOR_SLEEP);
+        addFormCheckBox(F("Send sensor to sleep"), F("sleep"), P047_SENSOR_SLEEP);
 
-        addFormCheckBox(F("Check sensor version"), F("version"), P047_CHECK_VERSION);
+        # if P047_FEATURE_BEFLE_V3
+
+        if (P047_MODEL_CATNIP == static_cast<P047_SensorModels>(P047_MODEL))
+        # endif // if P047_FEATURE_BEFLE_V3
+        {
+          addFormCheckBox(F("Check sensor version"), F("version"), P047_CHECK_VERSION);
+        }
       }
 
       # if P047_FEATURE_ADAFRUIT
@@ -209,9 +243,13 @@ boolean Plugin_047(uint8_t function, struct EventStruct *event, String& string)
         } else if (P047_MODEL_BEFLE == static_cast<P047_SensorModels>(model)) {
           P047_I2C_ADDR = P047_BEFLE_DEFAULT_ADDR;
           # if P047_FEATURE_ADAFRUIT
-        } else {
+        } else if (P047_MODEL_ADAFRUIT == static_cast<P047_SensorModels>(model)) {
           P047_I2C_ADDR = P047_ADAFRUIT_DEFAULT_ADDR;
           # endif // if P047_FEATURE_ADAFRUIT
+          # if P047_FEATURE_BEFLE_V3
+        } else if (P047_MODEL_BEFLE_V3 == static_cast<P047_SensorModels>(model)) {
+          P047_I2C_ADDR = P047_BEFLE_V3_DEFAULT_ADDR;
+          # endif // if P047_FEATURE_BEFLE_V3
         }
       }
 

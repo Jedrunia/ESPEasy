@@ -7,6 +7,7 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for Shift registers)
  * 2022-02-27 tonhuisman: Rename plugin title to Output - Shift registers (74HC595)
  * 2022-02-25 tonhuisman: Again rename commands, now using separate prefix shiftout and the rest of the previous command as subcommand.
  * 2022-02-24 tonhuisman: Further update changing 74hc commands to 74hc595.
@@ -79,15 +80,11 @@ boolean Plugin_126(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_126;
-      Device[deviceCount].Type               = DEVICE_TYPE_TRIPLE;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_QUAD;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].DecimalsOnly       = false;
-      Device[deviceCount].ValueCount         =
+      auto& dev = Device[++deviceCount];
+      dev.Number     = PLUGIN_ID_126;
+      dev.Type       = DEVICE_TYPE_TRIPLE;
+      dev.VType      = Sensor_VType::SENSOR_TYPE_QUAD;
+      dev.ValueCount =
       # if P126_MAX_CHIP_COUNT <= 4
         1
       # elif P126_MAX_CHIP_COUNT <= 8
@@ -98,10 +95,13 @@ boolean Plugin_126(uint8_t function, struct EventStruct *event, String& string)
         4
       # endif // if P126_MAX_CHIP_COUNT <= 4
       ;
-      Device[deviceCount].SendDataOption = true;
-      Device[deviceCount].TimerOption    = true;
-      Device[deviceCount].TimerOptional  = true;
-      Device[deviceCount].HasFormatUserVar = true;
+      dev.SendDataOption   = true;
+      dev.TimerOption      = true;
+      dev.TimerOptional    = true;
+      dev.HasFormatUserVar = true;
+      dev.setPin1Direction(gpio_direction::gpio_output);
+      dev.setPin2Direction(gpio_direction::gpio_output);
+      dev.setPin3Direction(gpio_direction::gpio_output);
 
       break;
     }
@@ -120,6 +120,15 @@ boolean Plugin_126(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[3], PSTR(PLUGIN_VALUENAME4_126));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_SET_DEFAULTS:
     {
@@ -166,8 +175,10 @@ boolean Plugin_126(uint8_t function, struct EventStruct *event, String& string)
         F("Decimal &amp; hex/bin"),
         F("Decimal only"),
         F("Hex/bin only") };
-      const int outputValues[] = { P126_OUTPUT_BOTH, P126_OUTPUT_DEC_ONLY, P126_OUTPUT_HEXBIN };
-      addFormSelector(F("Output selection"), F("output"), 3, outputOptions, outputValues, P126_CONFIG_FLAGS_GET_OUTPUT_SELECTION);
+      const int outputValues[]     = { P126_OUTPUT_BOTH, P126_OUTPUT_DEC_ONLY, P126_OUTPUT_HEXBIN };
+      constexpr size_t optionCount = NR_ELEMENTS(outputValues);
+      const FormSelectorOptions selector(optionCount, outputOptions, outputValues);
+      selector.addFormSelector(F("Output selection"), F("output"), P126_CONFIG_FLAGS_GET_OUTPUT_SELECTION);
 
       addFormCheckBox(F("Restore Values on warm boot"), F("valrestore"), P126_CONFIG_FLAGS_GET_VALUES_RESTORE);
 

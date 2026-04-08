@@ -24,7 +24,6 @@
 # define PLUGIN_VALUENAME2_028 "Humidity"
 # define PLUGIN_VALUENAME3_028 "Pressure"
 
-
 boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
@@ -33,19 +32,16 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_028;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_TEMP_HUM_BARO;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 3;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].ErrorStateValues   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number           = PLUGIN_ID_028;
+      dev.Type             = DEVICE_TYPE_I2C;
+      dev.VType            = Sensor_VType::SENSOR_TYPE_TEMP_HUM_BARO;
+      dev.FormulaOption    = true;
+      dev.ValueCount       = 3;
+      dev.SendDataOption   = true;
+      dev.TimerOption      = true;
+      dev.ErrorStateValues = true;
+      dev.PluginStats      = true;
       break;
     }
 
@@ -70,7 +66,8 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
       ExtraTaskSettings.setAllowedRange(1, 0.0f,   100.0f);  // Humidity min/max
       ExtraTaskSettings.setAllowedRange(2, 300.0f, 1100.0f); // Barometric Pressure min/max
 
-      switch (P028_ERROR_STATE_OUTPUT) {                     // Only temperature error is configurable
+      switch (P028_ERROR_STATE_OUTPUT)                       // Only temperature error is configurable
+      {
         case P028_ERROR_IGNORE:
           ExtraTaskSettings.setIgnoreRangeCheck(0);
           break;
@@ -130,13 +127,14 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
     {
-      const uint8_t i2cAddressValues[] = { 0x76, 0x77 };
+      const uint8_t i2cAddressValues[]  = { 0x76, 0x77 };
+      constexpr uint8_t i2cAddressCount = NR_ELEMENTS(i2cAddressValues);
 
       if (function == PLUGIN_WEBFORM_SHOW_I2C_PARAMS) {
-        addFormSelectorI2C(F("i2c_addr"), 2, i2cAddressValues, P028_I2C_ADDRESS);
+        addFormSelectorI2C(F("i2c_addr"), i2cAddressCount, i2cAddressValues, P028_I2C_ADDRESS);
         addFormNote(F("SDO Low=0x76, High=0x77"));
       } else {
-        success = intArrayContains(2, i2cAddressValues, event->Par1);
+        success = intArrayContains(i2cAddressCount, i2cAddressValues, event->Par1);
       }
       break;
     }
@@ -193,7 +191,8 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
           static_cast<int>(P028_data_struct::BMx_DetectMode::BME280),
           static_cast<int>(P028_data_struct::BMx_DetectMode::BMP280),
         };
-        addFormSelector(F("Output values mode"), F("det"), 2, detectOptionList, detectOptions, P028_DETECTION_MODE);
+        const FormSelectorOptions selector(NR_ELEMENTS(detectOptionList), detectOptionList, detectOptions);
+        selector.addFormSelector(F("Output values mode"), F("det"), P028_DETECTION_MODE);
 
         success = true;
       }
@@ -209,22 +208,24 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
 
       if (nullptr != P028_data) {
         if ((P028_data_struct::BMx_DetectMode::BMP280 != static_cast<P028_data_struct::BMx_DetectMode>(P028_DETECTION_MODE)) &&
-            P028_data->hasHumidity()) 
+            P028_data->hasHumidity())
         {
+          addRowColspan(2);
           P028_data->plot_ChartJS_scatter(
             0,
             1,
             F("temphumscatter"),
             { F("Temp/Humidity Scatter Plot") },
-            { F("temp/hum"), F("rgb(255, 99, 132)") },
-            500,
-            500);
+            { F("temp/hum"), F("rgb(255, 99, 132)") }
+            );
+          addHtml(F("</td></tr>"));
         }
       }
+
       // Do not set success = true, since we're not actually adding stats, but just plotting a scatter plot
       break;
     }
-#endif
+# endif // if FEATURE_PLUGIN_STATS && FEATURE_CHART_JS
 
 
     case PLUGIN_WEBFORM_SHOW_ERRORSTATE_OPT:
@@ -255,12 +256,12 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
         # endif // ifndef LIMIT_BUILD_SIZE
       };
       constexpr int P028_ERROR_STATE_COUNT = NR_ELEMENTS(resultsOptions);
-      addFormSelector(F("Temperature Error Value"),
-                      F("err"),
-                      P028_ERROR_STATE_COUNT,
-                      resultsOptions,
-                      resultsOptionValues,
-                      P028_ERROR_STATE_OUTPUT);
+      const FormSelectorOptions selector(
+        P028_ERROR_STATE_COUNT,
+        resultsOptions,
+        resultsOptionValues);
+      selector.addFormSelector(F("Temperature Error Value"), F("err"),
+                               P028_ERROR_STATE_OUTPUT);
 
       break;
     }
@@ -350,17 +351,17 @@ boolean Plugin_028(uint8_t function, struct EventStruct *event, String& string)
 
           if (loglevelActiveFor(LOG_LEVEL_INFO)) {
             String hum;
+
             if (P028_data->hasHumidity()) {
               hum = formatUserVarNoCheck(event, 1);
             }
-            addLogMove(LOG_LEVEL_INFO, concat(
-              P028_data_struct::getDeviceName(P028_data->sensorID),
-              strformat(
-                F(": Addr: %s T: %s H: %s P: %s"), 
-                formatToHex(P028_I2C_ADDRESS, 2).c_str(),
-                formatUserVarNoCheck(event, 0).c_str(),
-                hum.c_str(),
-                formatUserVarNoCheck(event, 2).c_str())));
+            addLogMove(LOG_LEVEL_INFO,
+                       strformat(F("%s: Addr: %s T: %s H: %s P: %s"),
+                                 FsP(P028_data_struct::getDeviceName(P028_data->sensorID)),
+                                 formatToHex(P028_I2C_ADDRESS, 2).c_str(),
+                                 formatUserVarNoCheck(event, 0).c_str(),
+                                 hum.c_str(),
+                                 formatUserVarNoCheck(event, 2).c_str()));
           }
           # endif // ifndef LIMIT_BUILD_SIZE
           success = true;

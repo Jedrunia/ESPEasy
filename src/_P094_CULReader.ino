@@ -9,7 +9,12 @@
 // Allows to control the mode of the CUL receiver
 //
 
-# include "src/ESPEasyCore/ESPEasyNetwork.h"
+/** Changelog:
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for CUL-reader)
+ */
+
+# include "ESPEasy/net/ESPEasyNetwork.h"
 
 # include "src/Helpers/ESPEasy_Storage.h"
 # include "src/Helpers/StringConverter.h"
@@ -53,22 +58,19 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_094;
-      Device[deviceCount].Type               = DEVICE_TYPE_SERIAL;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_STRING;
-      Device[deviceCount].OutputDataType     = Output_Data_type_t::Default;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = false;
-      Device[deviceCount].DuplicateDetection = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number             = PLUGIN_ID_094;
+      dev.Type               = DEVICE_TYPE_SERIAL;
+      dev.VType              = Sensor_VType::SENSOR_TYPE_STRING;
+      dev.OutputDataType     = Output_Data_type_t::Default;
+      dev.ValueCount         = 1;
+      dev.SendDataOption     = true;
+      dev.TimerOption        = true;
+      dev.DuplicateDetection = true;
 
       // FIXME TD-er: Not sure if access to any existing task data is needed when saving
-      Device[deviceCount].ExitTaskBeforeSave = true;
+      dev.ExitTaskBeforeSave = true;
+      dev.CustomVTypeVar     = true;
       break;
     }
 
@@ -82,6 +84,22 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_094));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_GET_DEVICEGPIONAMES: {
       serialHelper_getGpioNames(event, false, true); // TX optional
@@ -263,7 +281,7 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
 
           if (event->String2.length() > 0) {
             const bool   fromCUL = true;
-            const String source  = NetworkGetHostname();
+            const String source  = ESPEasy::net::NetworkGetHostname();
 
             if (Plugin_094_match_all(event->TaskIndex, event->String2, source, fromCUL)) {
               if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -318,10 +336,8 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
           # endif // if P094_DEBUG_OPTIONS
 
           if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-            String log = F("CUL Reader: Sending: ");
-            log += event->String2.substring(0, 20);
-            log += F("...");
-            addLogMove(LOG_LEVEL_INFO, log);
+            addLogMove(LOG_LEVEL_INFO, strformat(F("CUL Reader: Sending: %s..."),
+                                                 event->String2.substring(0, 20).c_str()));
           }
 
           //          sendData_checkDuplicates(event, event->String2.substring(0, 22));
@@ -416,6 +432,7 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
             // culreader,setfilters,EBZ.02.12345678;all|*.02.*;15m|TCH.44.*;once|*.*.*;5m
             success = true;
             P094_data->clearFilters();
+            P094_NR_FILTERS = 0;
             const String argument = parseString(string, 3);
 
             if (!argument.isEmpty()) {
@@ -446,7 +463,7 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
 
       break;
     }
-#ifdef USES_ESPEASY_NOW
+# ifdef USES_ESPEASY_NOW
     case PLUGIN_FILTEROUT_CONTROLLER_DATA:
     {
       // event->String1 => topic;
@@ -462,7 +479,7 @@ boolean Plugin_094(uint8_t function, struct EventStruct *event, String& string) 
 
       break;
     }
-#endif
+# endif // ifdef USES_ESPEASY_NOW
   }
   return success;
 }

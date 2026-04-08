@@ -2,6 +2,8 @@
 
 #ifdef USES_P116
 
+#include "../Helpers/Hardware_SPI.h"
+
 /****************************************************************************
  * ST77xx_type_toString: Display-value for the device selected
  ***************************************************************************/
@@ -13,6 +15,10 @@ const __FlashStringHelper* ST77xx_type_toString(const ST77xx_type_e& device) {
     case ST77xx_type_e::ST7735s_80x160_M5: return F("ST7735 80 x 160px (Color inverted)");
     # if P116_EXTRA_ST7735
     case ST77xx_type_e::ST7735s_135x240: return F("ST7735 135 x 240px");
+    case ST77xx_type_e::ST7735s_172x320: return F("ST7735 172 x 320px");
+    case ST77xx_type_e::ST77xxs_170x320: return F("ST77xx 170 x 320px");
+    case ST77xx_type_e::ST77xxs_240x320: return F("ST77xx 240 x 320px");
+    case ST77xx_type_e::ST77xxs_240x280: return F("ST77xx 240 x 280px");
     # endif // if P116_EXTRA_ST7735
     case ST77xx_type_e::ST7789vw_240x320: return F("ST7789 240 x 320px");
     case ST77xx_type_e::ST7789vw_240x240: return F("ST7789 240 x 240px");
@@ -72,6 +78,24 @@ void ST77xx_type_toResolution(const ST77xx_type_e& device,
       x = 135;
       y = 240;
       break;
+    # if P116_EXTRA_ST7735
+    case ST77xx_type_e::ST7735s_172x320:
+      x = 172;
+      y = 320;
+      break;
+    case ST77xx_type_e::ST77xxs_170x320:
+      x = 170;
+      y = 320;
+      break;
+    case ST77xx_type_e::ST77xxs_240x320:
+      x = 240;
+      y = 320;
+      break;
+    case ST77xx_type_e::ST77xxs_240x280:
+      x = 240;
+      y = 280;
+      break;
+    # endif // if P116_EXTRA_ST7735
     case ST77xx_type_e::ST7796s_320x480:
       x = 320;
       y = 480;
@@ -148,6 +172,10 @@ bool P116_data_struct::plugin_init(struct EventStruct *event) {
     addLog(LOG_LEVEL_INFO, F("ST77xx: Init start."));
     uint8_t initRoptions = 0xFF;
 
+    #ifdef ESP32
+    auto spi_ptr = getSPIBusForTask(event->TaskIndex);
+    if (!spi_ptr) return false;
+    #endif
     switch (_device) {
       case ST77xx_type_e::ST7735s_128x128:
 
@@ -175,6 +203,34 @@ bool P116_data_struct::plugin_init(struct EventStruct *event) {
           initRoptions = INITR_BLACKTAB135x240; // 135x240px
         }
 
+      // fall through
+      case ST77xx_type_e::ST7735s_172x320:
+
+        if (initRoptions == 0xFF) {
+          initRoptions = INITR_BLACKTAB172x320; // 172x320px
+        }
+
+      // fall through
+      case ST77xx_type_e::ST77xxs_170x320:
+
+        if (initRoptions == 0xFF) {
+          initRoptions = INITR_BLACKTAB170x320; // 170x320px
+        }
+
+        // fall through
+      case ST77xx_type_e::ST77xxs_240x320:
+
+        if (initRoptions == 0xFF) {
+          initRoptions = INITR_BLACKTAB240x320; // 240x320px
+        }
+
+        // fall through
+      case ST77xx_type_e::ST77xxs_240x280:
+
+        if (initRoptions == 0xFF) {
+          initRoptions = INITR_BLACKTAB240x280; // 240x280px
+        }
+
         // fall through
       # endif // if P116_EXTRA_ST7735
       case ST77xx_type_e::ST7735s_80x160:
@@ -183,7 +239,12 @@ bool P116_data_struct::plugin_init(struct EventStruct *event) {
           initRoptions = INITR_MINI160x80; // 80x160px
         }
 
+        # ifdef ESP32
+        st7735 = new (std::nothrow) Adafruit_ST7735(spi_ptr, PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP32
+        # ifdef ESP8266
         st7735 = new (std::nothrow) Adafruit_ST7735(PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP8166
 
         if (nullptr != st7735) {
           st7735->initR(initRoptions); // initialize a ST7735s chip
@@ -201,7 +262,12 @@ bool P116_data_struct::plugin_init(struct EventStruct *event) {
       case ST77xx_type_e::ST7789vw3_135x240:
       # endif // if P116_EXTRA_ST7789
       {
+        # ifdef ESP32
+        st7789 = new (std::nothrow) Adafruit_ST7789(spi_ptr, PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP32
+        # ifdef ESP8266
         st7789 = new (std::nothrow) Adafruit_ST7789(PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP8266
 
         if (nullptr != st7789) {
           uint8_t init_seq = 0; // Default/original initialisation
@@ -223,7 +289,12 @@ bool P116_data_struct::plugin_init(struct EventStruct *event) {
       }
       case ST77xx_type_e::ST7796s_320x480:
       {
+        # ifdef ESP32
+        st7796 = new (std::nothrow) Adafruit_ST7796S_kbv(spi_ptr, PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP32
+        # ifdef ESP8266
         st7796 = new (std::nothrow) Adafruit_ST7796S_kbv(PIN(0), PIN(1), PIN(2));
+        # endif // ifdef ESP8266
 
         if (nullptr != st7796) {
           st7796->begin();

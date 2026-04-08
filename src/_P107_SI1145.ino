@@ -5,6 +5,10 @@
 // #################################### Plugin-107: SI1145 - UV index / IR / visible  ####################
 // #######################################################################################################
 
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ */
+
 # include "src/PluginStructs/P107_data_struct.h"
 
 # define PLUGIN_107
@@ -22,18 +26,15 @@ boolean Plugin_107(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_107;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 3;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_107;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 3;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -50,6 +51,17 @@ boolean Plugin_107(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[2], PSTR(PLUGIN_VALUENAME3_107));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_LUX_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_IR_ONLY);
+      event->Par3 = static_cast<int>(Sensor_VType::SENSOR_TYPE_UV_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     {

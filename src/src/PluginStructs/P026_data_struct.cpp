@@ -3,8 +3,12 @@
 #ifdef USES_P026
 
 # include "../DataStructs/ESPEasy_packed_raw_data.h"
-# include "../ESPEasyCore/ESPEasyNetwork.h"
-# include "../Globals/ESPEasyWiFiEvent.h"
+# include "../../ESPEasy/net/ESPEasyNetwork.h"
+# include "../../ESPEasy/net/wifi/ESPEasyWifi.h"
+//# include "../../ESPEasy/net/Globals/ESPEasyWiFiEvent.h"
+#if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+# include "../Helpers/ESPEasy_UnitOfMeasure.h"
+#endif
 # include "../Helpers/Memory.h"
 # include "../Helpers/Hardware_temperature_sensor.h"
 # ifdef ESP32
@@ -128,13 +132,17 @@ float P026_get_value(uint8_t type)
     case P026_VALUETYPE_ip2:
     case P026_VALUETYPE_ip3:
     case P026_VALUETYPE_ip4:
-      res = NetworkLocalIP()[type - 5];
+      res = ESPEasy::net::NetworkLocalIP()[type - P026_VALUETYPE_ip1];
       break;
     case P026_VALUETYPE_web:
       res = timePassedSince(lastWeb) / 1000.0f;
       break; // respond in seconds
     case P026_VALUETYPE_freestack: res = getCurrentFreeStack(); break;
-    case P026_VALUETYPE_txpwr:     res = WiFiEventData.wifi_TX_pwr; break;
+# if FEATURE_SET_WIFI_TX_PWR
+    case P026_VALUETYPE_txpwr:     res = ESPEasy::net::wifi::GetWiFiTXpower(); break;
+#else
+    case P026_VALUETYPE_txpwr:     res = 0; break;
+#endif
 # ifdef USE_SECOND_HEAP
     case P026_VALUETYPE_free2ndheap:
       res = FreeMem2ndHeap();
@@ -156,6 +164,38 @@ float P026_get_value(uint8_t type)
   }
   return res;
 }
+
+# if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+Sensor_VType P026_get_valueVType(uint8_t type) {
+  switch (type)
+  {
+    case P026_VALUETYPE_uptime:   return Sensor_VType::SENSOR_TYPE_DURATION;
+    case P026_VALUETYPE_freeheap: return Sensor_VType::SENSOR_TYPE_DATA_SIZE;
+    case P026_VALUETYPE_rssi:     return Sensor_VType::SENSOR_TYPE_SIGNAL_STRENGTH;
+    case P026_VALUETYPE_vcc:      return Sensor_VType::SENSOR_TYPE_VOLTAGE_ONLY;
+    case P026_VALUETYPE_load:     return Sensor_VType::SENSOR_TYPE_POWER_FACT_ONLY;
+    case P026_VALUETYPE_ip1:
+    case P026_VALUETYPE_ip2:
+    case P026_VALUETYPE_ip3:
+    case P026_VALUETYPE_ip4:       return Sensor_VType::SENSOR_TYPE_NONE;
+    case P026_VALUETYPE_web:       return Sensor_VType::SENSOR_TYPE_DURATION;
+    case P026_VALUETYPE_freestack: return Sensor_VType::SENSOR_TYPE_DATA_SIZE;
+    case P026_VALUETYPE_txpwr:     return Sensor_VType::SENSOR_TYPE_SOUND_PRESSURE;
+#  ifdef USE_SECOND_HEAP
+    case P026_VALUETYPE_free2ndheap:  return Sensor_VType::SENSOR_TYPE_DATA_SIZE;
+#  endif // ifdef USE_SECOND_HEAP
+#  if FEATURE_INTERNAL_TEMPERATURE
+    case P026_VALUETYPE_internaltemp: return Sensor_VType::SENSOR_TYPE_TEMP_ONLY;
+#  endif // if FEATURE_INTERNAL_TEMPERATURE
+#  if defined(ESP32) && defined(BOARD_HAS_PSRAM)
+    case P026_VALUETYPE_freepsram:    return Sensor_VType::SENSOR_TYPE_DATA_SIZE;
+#  endif // if defined(ESP32) && defined(BOARD_HAS_PSRAM)
+  }
+
+  return Sensor_VType::SENSOR_TYPE_NONE;
+}
+
+# endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
 bool P026_data_struct::GetDeviceValueNames(struct EventStruct *event)
 {
@@ -200,6 +240,23 @@ bool P026_data_struct::WebformSave(struct EventStruct *event)
     const uint8_t pconfigIndex = i + P026_QUERY1_CONFIG_POS;
     const uint8_t choice       = PCONFIG(pconfigIndex);
     sensorTypeHelper_saveOutputSelector(event, pconfigIndex, i, Plugin_026_valuename(choice, false));
+    # if FEATURE_MQTT_DISCOVER && FEATURE_CUSTOM_TASKVAR_VTYPE && FEATURE_TASKVALUE_UNIT_OF_MEASURE
+
+    if (choice != PCONFIG(pconfigIndex)) {
+      const Sensor_VType vtype = P026_get_valueVType(PCONFIG(pconfigIndex));
+      ExtraTaskSettings.setTaskVarCustomVType(i, static_cast<uint8_t>(vtype));
+      const String uom = getValueType2DefaultHAUoM(vtype);
+      ExtraTaskSettings.setTaskVarUnitOfMeasure(i, 0);
+
+      if (!uom.isEmpty()) {
+        const int uomIdx = getUnitOfMeasureIndex(uom);
+
+        if (uomIdx > 0) {
+          ExtraTaskSettings.setTaskVarUnitOfMeasure(i, uomIdx);
+        }
+      }
+    }
+    # endif // if FEATURE_MQTT_DISCOVER && FEATURE_CUSTOM_TASKVAR_VTYPE && FEATURE_TASKVALUE_UNIT_OF_MEASURE
   }
   return true;
 }
@@ -209,7 +266,7 @@ bool P026_data_struct::Plugin_Read(struct EventStruct *event)
   const int valueCount = P026_NR_OUTPUT_VALUES;
 
   for (int i = 0; i < valueCount; ++i) {
-    UserVar.setFloat(event->TaskIndex, i,  P026_get_value(PCONFIG(i)));
+    UserVar.setFloat(event->TaskIndex, i, P026_get_value(PCONFIG(i)));
   }
       # ifndef LIMIT_BUILD_SIZE
 

@@ -1,3 +1,7 @@
+#ifndef PLUGINSTRUCTS_P167_DATA_STRUCT_H
+#define PLUGINSTRUCTS_P167_DATA_STRUCT_H
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 // P167 device class for IKEA Vindstyrka SEN54 temperature , humidity and air quality sensors
 // See datasheet https://sensirion.com/media/documents/6791EFA0/62A1F68F/Sensirion_Datasheet_Environmental_Node_SEN5x.pdf
@@ -104,6 +108,9 @@ const __FlashStringHelper* toString(P167_model model);
 const __FlashStringHelper* P167_getQueryString(uint8_t query);
 const __FlashStringHelper* P167_getQueryValueString(uint8_t query);
 
+# if FEATURE_MQTT_DISCOVER
+int                        Plugin_167_QueryVType(uint8_t value_nr);
+# endif // if FEATURE_MQTT_DISCOVER
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 // ESPeasy standard PluginTaskData structure for this plugin
@@ -268,3 +275,5 @@ private:
   volatile uint64_t monpinLastTransitionTime = 0;
 };
 #endif // USES_P167
+
+#endif // ifndef PLUGINSTRUCTS_P167_DATA_STRUCT_H

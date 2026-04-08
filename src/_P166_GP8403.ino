@@ -6,6 +6,8 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-03-15 tonhuisman: Removed unneeded I2C Enabled check.
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
  * 2024-01-29 tonhuisman: Fix bug that changed Initial output values are not applied until a reset/power cycle.
  *                        Disable development-log at Settings Save
  * 2024-01-28 tonhuisman: Add option to restore output values on warm boot (default enabled, using unused 4th value for state)
@@ -53,19 +55,16 @@ boolean Plugin_166(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_166;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_DUAL;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 2;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true; // FIXME: Is this useful?
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_166;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_DUAL;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 2;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.PluginStats    = true; // FIXME: Is this useful?
 
       break;
     }
@@ -84,6 +83,16 @@ boolean Plugin_166(uint8_t function, struct EventStruct *event, String& string)
 
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_ANALOG_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_ANALOG_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -129,12 +138,9 @@ boolean Plugin_166(uint8_t function, struct EventStruct *event, String& string)
           static_cast<int>(DFRobot_GP8403::eOutPutRange_t::eOutputRange5V),
           static_cast<int>(DFRobot_GP8403::eOutPutRange_t::eOutputRange10V),
         };
-        addFormSelector(F("Output range"),
-                        F("range"),
-                        sizeof(configurationOptions) / sizeof(configurationOptions[0]),
-                        configurations,
-                        configurationOptions,
-                        P166_MAX_VOLTAGE);
+        constexpr size_t optionCount = NR_ELEMENTS(configurationOptions);
+        const FormSelectorOptions selector(optionCount, configurations, configurationOptions);
+        selector.addFormSelector(F("Output range"), F("range"), P166_MAX_VOLTAGE);
       }
 
       addFormCheckBox(F("Restore output on warm boot"), F("prstr"), P166_RESTORE_VALUES == 1);
@@ -220,16 +226,12 @@ boolean Plugin_166(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
     {
-      if (Settings.isI2CEnabled()) {
-        initPluginTaskData(event->TaskIndex,
-                           new (std::nothrow) P166_data_struct(P166_I2C_ADDRESS,
-                                                               static_cast<DFRobot_GP8403::eOutPutRange_t>(P166_MAX_VOLTAGE)));
-        P166_data_struct *P166_data = static_cast<P166_data_struct *>(getPluginTaskData(event->TaskIndex));
+      initPluginTaskData(event->TaskIndex,
+                         new (std::nothrow) P166_data_struct(P166_I2C_ADDRESS,
+                                                             static_cast<DFRobot_GP8403::eOutPutRange_t>(P166_MAX_VOLTAGE)));
+      P166_data_struct *P166_data = static_cast<P166_data_struct *>(getPluginTaskData(event->TaskIndex));
 
-        success = (nullptr != P166_data) && P166_data->init(event);
-      } else {
-        addLog(LOG_LEVEL_ERROR, F("GP8403: I2C not enabled, init cancelled."));
-      }
+      success = (nullptr != P166_data) && P166_data->init(event);
 
       break;
     }

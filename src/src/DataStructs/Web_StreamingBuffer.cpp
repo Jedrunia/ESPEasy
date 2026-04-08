@@ -1,18 +1,17 @@
 #include "../DataStructs/Web_StreamingBuffer.h"
 
-#include "../DataStructs/tcp_cleanup.h"
 #include "../DataTypes/ESPEasyTimeSource.h"
 #include "../ESPEasyCore/ESPEasy_Log.h"
-#include "../ESPEasyCore/ESPEasyNetwork.h"
 
 // FIXME TD-er: Should keep a pointer to the webserver as a member, not use the global defined one.
 #include "../Globals/Services.h"
 
 #include "../Helpers/ESPEasy_time_calc.h"
-#include "../Helpers/Convert.h"
 #include "../Helpers/StringConverter.h"
 
-#include "../../ESPEasy_common.h"
+#ifdef ESP8266
+#include "../../../src/ESPEasy/net/Helpers/tcp_cleanup_ESP8266.h"
+#endif
 
 #ifdef ESP8266
 #define CHUNKED_BUFFER_SIZE         512
@@ -203,7 +202,7 @@ void Web_StreamingBuffer::startStream(const __FlashStringHelper * content_type,
 
 
 void Web_StreamingBuffer::startJsonStream() {
-  startStream(true, F("application/json"), F("*"));
+  startStream(false, F("application/json"), F(""));
 }
 
 void Web_StreamingBuffer::startStream(bool allowOriginAll, 
@@ -221,6 +220,10 @@ void Web_StreamingBuffer::startStream(bool allowOriginAll,
   sentBytes    = 0;
   buf.clear();
   buf.reserve(CHUNKED_BUFFER_SIZE);
+  web_server.client().setNoDelay(true);
+#ifdef ESP32
+  web_server.client().setSSE(false);
+#endif
   
   if (beforeTXRam < 3000) {
     lowMemorySkip = true;
@@ -268,7 +271,7 @@ void Web_StreamingBuffer::endStream() {
     buf.clear();
     sendContentBlocking(buf);
 
-    web_server.client().flush();
+    web_server.client().PR_9453_FLUSH_TO_CLEAR();
 
     finalRam = ESP.getFreeHeap();
 
@@ -289,7 +292,12 @@ void Web_StreamingBuffer::endStream() {
       addLog(LOG_LEVEL_ERROR, concat("Webpage skipped: low memory: ", finalRam));
     lowMemorySkip = false;
   }
+
   delay(5);
+  web_server.client().stop();
+  #ifdef ESP8266
+  tcpCleanup();
+  #endif
 }
 
 
@@ -328,10 +336,17 @@ void Web_StreamingBuffer::sendContentBlocking(String& data) {
   if (length > 0) { web_server.sendContent(data); }
   web_server.sendContent("\r\n");
 #else // ESP8266 2.4.0rc2 and higher and the ESP32 webserver supports chunked http transfer
+  #if defined(ESP8266) && defined(USE_SECOND_HEAP)
+  {
+    HeapSelectIram ephemeral;
+    web_server.sendContent(data);
+  }
+  #else
   web_server.sendContent(data);
+  #endif
 
   if (data.length() > (CHUNKED_BUFFER_SIZE + 1)) {
-    data = String(); // Clear also allocated memory
+    free_string(data); // Clear also allocated memory
   } else {
     data.clear();
   }
@@ -368,7 +383,7 @@ void Web_StreamingBuffer::sendHeaderBlocking(bool allowOriginAll,
   checkRAM(F("sendHeaderBlocking"));
   #endif
   
-  web_server.client().flush();
+  web_server.client().PR_9453_FLUSH_TO_CLEAR();
 
 #if defined(ESP8266) && defined(ARDUINO_ESP8266_RELEASE_2_3_0)
   web_server.setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -390,11 +405,19 @@ void Web_StreamingBuffer::sendHeaderBlocking(bool allowOriginAll,
   if (!cacheable)
     web_server.sendHeader(F("Cache-Control"), F("no-cache"));
 
+#if ESP_IDF_VERSION_MAJOR>4
+  if (origin.equals("*")) {
+    web_server.enableCORS(true);
+  } else
+#endif
   if (origin.length() > 0) {
+#if ESP_IDF_VERSION_MAJOR>4
+    web_server.enableCORS(false);
+#endif
     web_server.sendHeader(F("Access-Control-Allow-Origin"), origin);
   }
   web_server.send(httpCode, content_type, EMPTY_STRING);
-
+#ifdef ESP8266
   // dont wait on 2.3.0. Memory returns just too slow.
   while ((ESP.getFreeHeap() < freeBeforeSend) &&
          !timeOutReached(beginWait + timeout)) {
@@ -403,6 +426,7 @@ void Web_StreamingBuffer::sendHeaderBlocking(bool allowOriginAll,
     #endif
     delay(1);
   }
+#endif
 #endif // if defined(ESP8266) && defined(ARDUINO_ESP8266_RELEASE_2_3_0)
   delay(0);
 }

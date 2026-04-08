@@ -8,6 +8,11 @@
 // ESPEasy Plugin to scan a 13x3 key pad matrix chip HT16K33
 // written by Jochen Krapf (jk@nerd2nerd.org)
 
+/** Changelog:
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for Keypad scancode)
+ */
+
 // Connecting KeyPad to HT16K33-board:
 // Column 1 = C1 (over diode)
 // Column 2 = C2 (over diode)
@@ -46,18 +51,15 @@ boolean Plugin_058(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_058;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SWITCH;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = true;
-      Device[deviceCount].GlobalSyncOption   = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_058;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SWITCH;
+      dev.ValueCount     = 1;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.CustomVTypeVar = true;
       break;
     }
 
@@ -72,6 +74,22 @@ boolean Plugin_058(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_058));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:

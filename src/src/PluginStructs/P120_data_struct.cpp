@@ -4,6 +4,7 @@
 
 # define P120_RAD_TO_DEG        57.295779f // 180.0/M_PI
 
+# include "../Helpers/Hardware_SPI.h"
 
 P120_data_struct::P120_data_struct(uint8_t aSize)
   : _aSize(aSize)
@@ -235,7 +236,17 @@ bool P120_data_struct::init_sensor(struct EventStruct *event) {
   if (i2c_mode) {
     adxl345 = new (std::nothrow) ADXL345(_i2c_addr); // Init using I2C
   } else {
-    adxl345 = new (std::nothrow) ADXL345(_cs_pin);   // Init using SPI
+    # ifdef ESP32
+    auto spi_ptr = getSPIBusForTask(event->TaskIndex);
+    if (!spi_ptr) {
+      return false;
+    }
+    # endif // ifdef ESP32
+    adxl345 = new (std::nothrow) ADXL345(_cs_pin
+                                         # ifdef ESP32
+                                         , *spi_ptr
+                                         # endif // ifdef ESP32
+                                         ); // Init using SPI
   }
 
   if (initialized()) {
@@ -519,7 +530,8 @@ bool P120_data_struct::plugin_webform_loadOutputSelector(struct EventStruct *eve
     const int values[] = { 0,
                            1 };
     const int choice = bitRead(P120_CONFIG_FLAGS1, P120_FLAGS1_ANGLE_IN_RAD);
-    addFormSelector(F("Angle Units"), F("angle_rad"), 2, options, values, choice);
+    const FormSelectorOptions selector(2, options, values);
+    selector.addFormSelector(F("Angle Units"), F("angle_rad"), choice);
   }
   return true;
 }
@@ -528,13 +540,16 @@ bool P120_data_struct::plugin_webform_load(struct EventStruct *event) {
   // Range
   {
     const __FlashStringHelper *rangeOptions[] = {
-      F("2g"),
-      F("4g"),
-      F("8g"),
-      F("16g (default)") };
+      F("2"),
+      F("4"),
+      F("8"),
+      F("16") };
     int rangeValues[] = { P120_RANGE_2G, P120_RANGE_4G, P120_RANGE_8G, P120_RANGE_16G };
-    addFormSelector(F("Range"), F("range"), 4, rangeOptions, rangeValues,
-                    get2BitFromUL(P120_CONFIG_FLAGS1, P120_FLAGS1_RANGE));
+    FormSelectorOptions selector(4, rangeOptions, rangeValues);
+    selector.default_index = P120_RANGE_16G;
+    selector.addFormSelector(F("Range"), F("range"),
+                             get2BitFromUL(P120_CONFIG_FLAGS1, P120_FLAGS1_RANGE));
+    addUnit('g');
   }
 
   // Axis selection
@@ -627,7 +642,8 @@ bool P120_data_struct::plugin_webform_load(struct EventStruct *event) {
       F("10"),
       F("50") };
     int frequencyValues[] = { P120_FREQUENCY_10, P120_FREQUENCY_50 };
-    addFormSelector(F("Measuring frequency"), F("frequency"), 2, frequencyOptions, frequencyValues, P120_FREQUENCY);
+    const FormSelectorOptions selector(2, frequencyOptions, frequencyValues);
+    selector.addFormSelector(F("Measuring frequency"), F("frequency"), P120_FREQUENCY);
     addUnit(F("Hz"));
     addFormNote(F("Values X/Y/Z are updated 1x per second, Controller updates &amp; Value-events are based on 'Interval' setting."));
   }

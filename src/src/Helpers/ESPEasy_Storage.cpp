@@ -15,30 +15,32 @@
 # include "../ESPEasyCore/Controller.h"
 #endif // if FEATURE_MQTT
 #include "../ESPEasyCore/ESPEasy_Log.h"
-#include "../ESPEasyCore/ESPEasyNetwork.h"
-#include "../ESPEasyCore/ESPEasyWifi.h"
+#include "../../ESPEasy/net/ESPEasyNetwork.h"
+#include "../../ESPEasy/net/wifi/ESPEasyWifi.h"
+
 #include "../ESPEasyCore/Serial.h"
 
 #include "../Globals/CRCValues.h"
 #include "../Globals/Cache.h"
 #include "../Globals/Device.h"
-#include "../Globals/ESPEasyWiFiEvent.h"
+#include "../../ESPEasy/net/Globals/ESPEasyWiFiEvent.h"
 #include "../Globals/ESPEasy_Scheduler.h"
 #include "../Globals/ESPEasy_time.h"
 #include "../Globals/EventQueue.h"
 #include "../Globals/ExtraTaskSettings.h"
-#include "../Globals/NetworkState.h"
+#include "../../ESPEasy/net/Globals/NetworkState.h"
 #include "../Globals/Plugins.h"
 #include "../Globals/RTC.h"
 #include "../Globals/ResetFactoryDefaultPref.h"
 #include "../Globals/RuntimeData.h"
 #include "../Globals/SecuritySettings.h"
 #include "../Globals/Settings.h"
-#include "../Globals/WiFi_AP_Candidates.h"
+#include "../../ESPEasy/net/Globals/WiFi_AP_Candidates.h"
 
 #include "../Helpers/ESPEasyRTC.h"
 #include "../Helpers/ESPEasy_checks.h"
 #include "../Helpers/ESPEasy_FactoryDefault.h"
+#include "../Helpers/ESPEasy_NVS_Helper.h"
 #include "../Helpers/ESPEasy_time_calc.h"
 #include "../Helpers/FS_Helper.h"
 #include "../Helpers/Hardware.h"
@@ -50,6 +52,9 @@
 #include "../Helpers/PeriodicalActions.h"
 #include "../Helpers/StringConverter.h"
 #include "../Helpers/StringParser.h"
+#if FEATURE_MQTT
+#include "../Helpers/_CPlugin_Helper.h"
+#endif
 
 #if FEATURE_RTC_CACHE_STORAGE
 # include "../Globals/C016_ControllerCache.h"
@@ -57,9 +62,11 @@
 
 #ifdef ESP32
 # include <esp_partition.h>
-#endif // ifdef ESP32
+#ifndef ESP32P4
+#  include <esp_phy_init.h>
+#endif
 
-#ifdef ESP32
+
 String patch_fname(const String& fname) {
   if (fname.startsWith(F("/"))) {
     return fname;
@@ -132,22 +139,41 @@ bool fileExists(const __FlashStringHelper *fname)
   return fileExists(String(fname));
 }
 
+bool fileExists(const __FlashStringHelper *fname, FileDestination_e& destination)
+{
+  return fileExists(String(fname), destination);
+}
+
 bool fileExists(const String& fname) {
+  FileDestination_e dummy;
+  return fileExists(fname, dummy);
+}
+
+bool fileExists(const String& fname, FileDestination_e& destination) {
   #ifdef USE_SECOND_HEAP
   HeapSelectDram ephemeral;
   #endif // ifdef USE_SECOND_HEAP
 
   const String patched_fname = patch_fname(fname);
   auto search                = Cache.fileExistsMap.find(patched_fname);
+  destination                = FileDestination_e::ANY;
 
   if (search != Cache.fileExistsMap.end()) {
-    return search->second;
+    destination = static_cast<FileDestination_e>(search->second - 1);
+    return search->second != 0;
   }
   bool res = ESPEASY_FS.exists(patched_fname);
+  if (res) {
+    destination = FileDestination_e::FLASH;
+  }
+
   #if FEATURE_SD
 
   if (!res) {
     res = SD.exists(patched_fname);
+    if (res) {
+      destination = FileDestination_e::SD;
+    }
   }
   #endif // if FEATURE_SD
 
@@ -161,15 +187,15 @@ bool fileExists(const String& fname) {
     Cache.fileExistsMap.emplace(
       std::make_pair(
         patched_fname,
-        res));
+        res ? (static_cast<uint8_t>(destination) + 1) : 0));
   }
 
   if (Cache.fileCacheClearMoment == 0) {
-    if (node_time.timeSource == timeSource_t::No_time_source) {
+    if (node_time.getTimeSource() == timeSource_t::No_time_source) {
       // use some random value as we don't have a time yet
       Cache.fileCacheClearMoment = HwRandom();
     } else {
-      Cache.fileCacheClearMoment = node_time.now();
+      Cache.fileCacheClearMoment = node_time.getLocalUnixTime();
     }
   }
   return res;
@@ -183,7 +209,8 @@ fs::File tryOpenFile(const String& fname, const String& mode, FileDestination_e 
     return f;
   }
 
-  bool exists = fileExists(fname);
+  FileDestination_e where = FileDestination_e::ANY;
+  const bool exists = fileExists(fname, where);
 
   if (!exists) {
     if (equals(mode, 'r')) {
@@ -192,12 +219,12 @@ fs::File tryOpenFile(const String& fname, const String& mode, FileDestination_e 
     clearFileCaches();
   }
 
-  if ((destination == FileDestination_e::ANY) || (destination == FileDestination_e::FLASH)) {
+  if (where != FileDestination_e::SD && ((destination == FileDestination_e::ANY) || (destination == FileDestination_e::FLASH))) {
     f = ESPEASY_FS.open(patch_fname(fname), mode.c_str());
   }
   #if FEATURE_SD
 
-  if (!f && ((destination == FileDestination_e::ANY) || (destination == FileDestination_e::SD))) {
+  if ((!f || where == FileDestination_e::SD) && ((destination == FileDestination_e::ANY) || (destination == FileDestination_e::SD))) {
     f = SD.open(patch_fname(fname).c_str(), mode.c_str());
   }
   #endif // if FEATURE_SD
@@ -242,8 +269,9 @@ bool tryDeleteFile(const String& fname, FileDestination_e destination) {
   if (fname.length() > 0)
   {
     #if FEATURE_RTC_CACHE_STORAGE
+    const bool cacheFile = isCacheFile(fname);
 
-    if (isCacheFile(fname)) {
+    if (cacheFile) {
       ControllerCache.closeOpenFiles();
     }
     #endif // if FEATURE_RTC_CACHE_STORAGE
@@ -264,6 +292,11 @@ bool tryDeleteFile(const String& fname, FileDestination_e destination) {
       res = SD.remove(patch_fname(fname));
     }
     #endif // if FEATURE_SD
+#ifndef BUILD_NO_DEBUG
+    if (!res) {
+      addLog(LOG_LEVEL_ERROR, concat(F("Del  : Could not delete "), patch_fname(fname)));
+    }
+#endif
 
     // A call to GarbageCollection() will at most erase a single block. (e.g. 8k block size)
     // A deleted file may have covered more than a single block, so try to clear multiple blocks.
@@ -272,6 +305,14 @@ bool tryDeleteFile(const String& fname, FileDestination_e destination) {
     while (retries > 0 && GarbageCollection()) {
       --retries;
     }
+#if FEATURE_RTC_CACHE_STORAGE
+/*
+    if (cacheFile) {
+      ControllerCache.updateRTC_filenameCounters();
+      // FIXME TD-er: Tell Cache Reader a file has been deleted
+    }
+*/
+#endif
     return res;
   }
   return false;
@@ -403,11 +444,11 @@ bool BuildFixes()
 
   if (Settings.Build < 20112) {
     Settings.WiFi_TX_power           = 70; // 70 = 17.5dBm. unit: 0.25 dBm
-    Settings.WiFi_sensitivity_margin = 3;  // Margin in dBm on top of sensitivity.
+    Settings.WiFi_sensitivity_margin = 5;  // Margin in dBm on top of sensitivity.
   }
 
   if (Settings.Build < 20113) {
-    Settings.NumberExtraWiFiScans = 0;
+    Settings.ConnectFailRetryCount = 0;
   }
 
   if (Settings.Build < 20114) {
@@ -425,7 +466,7 @@ bool BuildFixes()
   }
 
   if (Settings.Build < 20115) {
-    if (Settings.InitSPI != static_cast<int>(SPI_Options_e::UserDefined)) { // User-defined SPI pins set to None
+    if (Settings.InitSPI != static_cast<int>(SPI_Options_e::UserDefined_VSPI)) { // User-defined SPI pins set to None
       Settings.SPI_SCLK_pin = -1;
       Settings.SPI_MISO_pin = -1;
       Settings.SPI_MOSI_pin = -1;
@@ -448,6 +489,77 @@ bool BuildFixes()
     Settings.VariousBits_1.unused_15 = 0;
   }
   #endif // ifdef USES_P053
+
+  if (Settings.Build <= 21066) { // 2024-12-31
+    // (MQTT) Keep Alive time-out is now defined in the controller settings.
+    #if FEATURE_MQTT
+    for (controllerIndex_t controller_idx = 0; controller_idx < CONTROLLER_MAX; ++controller_idx) {
+    // controllerIndex_t controller_idx = firstEnabledMQTT_ControllerIndex();
+      const protocolIndex_t protocol_idx = getProtocolIndex_from_ControllerIndex(controller_idx);
+
+    if (validProtocolIndex(protocol_idx) && getProtocolStruct(protocol_idx).usesMQTT) {
+      MakeControllerSettings(ControllerSettings); // -V522
+
+      if (AllocatedControllerSettings()) {
+        LoadControllerSettings(controller_idx, *ControllerSettings);
+
+        // Used to be hardcoded at 10 sec., now default 60 sec. and configurable
+        ControllerSettings->KeepAliveTime = CONTROLLER_KEEP_ALIVE_TIME_DFLT;
+        SaveControllerSettings(controller_idx, *ControllerSettings);
+      }
+    }
+    }
+    #endif // if FEATURE_MQTT
+  }
+
+  if (Settings.Build <= 21156) { // 2025-03-31
+    // PR #5235 Add 2nd and 3rd I2C Bus
+    if ((Settings.Pin_i2c2_sda == 0) &&
+        (Settings.Pin_i2c2_scl == 0)) {
+      Settings.Pin_i2c2_sda = DEFAULT_PIN_I2C2_SDA;
+      Settings.Pin_i2c2_scl = DEFAULT_PIN_I2C2_SCL;
+    }
+    if ((Settings.Pin_i2c3_sda == 0) &&
+        (Settings.Pin_i2c3_scl == 0)) {
+      Settings.Pin_i2c3_sda = DEFAULT_PIN_I2C3_SDA;
+      Settings.Pin_i2c3_scl = DEFAULT_PIN_I2C3_SCL;
+    }
+    if ((Settings.I2C2_clockSpeed == 0) &&
+        (Settings.I2C2_clockSpeed_Slow == 0)) {
+      Settings.I2C2_clockSpeed = DEFAULT_I2C_CLOCK_SPEED;
+      Settings.I2C2_clockSpeed_Slow = DEFAULT_I2C_CLOCK_SPEED_SLOW;
+    }
+    if ((Settings.I2C3_clockSpeed == 0) &&
+        (Settings.I2C3_clockSpeed_Slow == 0)) {
+      Settings.I2C3_clockSpeed = DEFAULT_I2C_CLOCK_SPEED;
+      Settings.I2C3_clockSpeed_Slow = DEFAULT_I2C_CLOCK_SPEED_SLOW;
+    }
+    if ((Settings.I2C2_Multiplexer_Type == 0) &&
+        (Settings.I2C2_Multiplexer_Addr == 0) &&
+        (Settings.I2C2_Multiplexer_ResetPin == 0)) {
+      Settings.I2C2_Multiplexer_Type = I2C_MULTIPLEXER_NONE;
+      Settings.I2C2_Multiplexer_Addr = -1;
+      Settings.I2C2_Multiplexer_ResetPin = -1;
+    }
+    if ((Settings.I2C3_Multiplexer_Type == 0) &&
+        (Settings.I2C3_Multiplexer_Addr == 0) &&
+        (Settings.I2C3_Multiplexer_ResetPin == 0)) {
+      Settings.I2C3_Multiplexer_Type = I2C_MULTIPLEXER_NONE;
+      Settings.I2C3_Multiplexer_Addr = -1;
+      Settings.I2C3_Multiplexer_ResetPin = -1;
+    }
+  }
+
+  if (Settings.Build <= 21303) { // 2025-08-25
+    // Add second SPI bus
+    if ((Settings.SPI1_SCLK_pin == 0) &&
+        (Settings.SPI1_MISO_pin == 0) &&
+        (Settings.SPI1_MOSI_pin == 0) ){
+      Settings.SPI1_SCLK_pin = -1;
+      Settings.SPI1_MISO_pin = -1;
+      Settings.SPI1_MOSI_pin = -1;
+    }
+  }
 
   // Starting 2022/08/18
   // Use get_build_nr() value for settings transitions.
@@ -519,18 +631,109 @@ void fileSystemCheck()
 }
 
 bool FS_format() {
-   #ifdef USE_LITTLEFS
-     # ifdef ESP32
+#ifdef USE_LITTLEFS
+# ifdef ESP32
   const bool res = ESPEASY_FS.begin(true);
   ESPEASY_FS.end();
   return res;
-     # else // ifdef ESP32
+# else // ifdef ESP32
   return ESPEASY_FS.format();
-     # endif // ifdef ESP32
-   #else // ifdef USE_LITTLEFS
+# endif // ifdef ESP32
+#else // ifdef USE_LITTLEFS
   return ESPEASY_FS.format();
 
-   #endif // ifdef USE_LITTLEFS
+#endif // ifdef USE_LITTLEFS
+}
+
+#ifdef ESP32
+// Max. 15 char keys for RF calibration marked keys
+# define ESPEASY_RF_CAL_NVS_NAMESPACE  "ESPEasyRFcal"
+# define RF_CAL_NVS_PREF_KEY       "RfCalIDFver"
+uint32_t getWiFi_CalibrationVersion()
+{
+  ESPEasy_NVS_Helper preferences;
+  if (preferences.begin(F(ESPEASY_RF_CAL_NVS_NAMESPACE))) {
+    uint32_t res{};
+    if (preferences.getPreference(F(RF_CAL_NVS_PREF_KEY), res)) {
+      return res;
+    }
+  }
+  return 0;
+}
+
+bool setWiFi_CalibrationVersion() {
+  // Store used IDF version in NVS
+  const uint32_t idfVersion = ESP_IDF_VERSION;
+  ESPEasy_NVS_Helper preferences;
+  if (preferences.begin(F(ESPEASY_RF_CAL_NVS_NAMESPACE))) {
+    preferences.setPreference(F(RF_CAL_NVS_PREF_KEY), idfVersion);
+    return true;
+  }
+  return false;
+}
+
+String formatIdfVersion(uint32_t idfVer) {
+  return strformat(
+    F("%u.%u.%u"),
+    (idfVer >> 16) & 0xFF,
+    (idfVer >> 8) & 0xFF,
+    (idfVer) & 0xFF);
+}
+
+bool check_and_update_WiFi_Calibration() {
+  const uint32_t RFcal_idfVersion = getWiFi_CalibrationVersion();
+  const uint32_t idfVersion = ESP_IDF_VERSION;
+
+  if (RFcal_idfVersion == idfVersion) {
+    // No need to wipe RF calibration
+    addLog(LOG_LEVEL_INFO, strformat(
+      F("RF Cal: last calibration done with ESP-IDF %s"),
+      formatIdfVersion(idfVersion).c_str()));
+    return false;
+  }
+  if (RFcal_idfVersion) {
+    addLog(LOG_LEVEL_INFO, strformat(
+      F("RF Cal: last calibration with ESP-IDF %s, re-calibrating with ESP-IDF %s"),
+      formatIdfVersion(RFcal_idfVersion).c_str(),
+      formatIdfVersion(idfVersion).c_str()));
+  } else {
+    addLog(LOG_LEVEL_INFO, strformat(
+      F("RF Cal: last calibration unknown, (re-)calibrating with ESP-IDF %s"),
+      formatIdfVersion(idfVersion).c_str()));
+  }
+  return Erase_WiFi_Calibration();
+}
+#endif
+
+bool Erase_WiFi_Calibration() {
+  #ifdef ESP8266
+  ESPEasy::net::wifi::WifiDisconnect();
+  ESPEasy::net::wifi::setWifiMode(WIFI_OFF);
+  if (!ESP.eraseConfig())
+    return false;
+  #ifndef LIMIT_BUILD_SIZE
+  addLog(LOG_LEVEL_INFO, F("WiFi : Erased WiFi calibration data"));
+  #endif
+  #endif
+
+  #ifdef ESP32
+  # ifndef SOC_WIFI_SUPPORTED
+  return false;
+  #else
+  ESPEasy::net::wifi::WifiDisconnect();
+  ESPEasy::net::wifi::setWifiMode(WIFI_OFF);
+  // Make sure power is stable, so wait a bit longer
+  delay(1000);
+  esp_phy_erase_cal_data_in_nvs();
+  addLog(LOG_LEVEL_INFO, F("WiFi : Erased WiFi calibration data"));
+  delay(200);
+  esp_phy_load_cal_and_init();
+  addLog(LOG_LEVEL_INFO, F("WiFi : Performed WiFi RF calibration"));
+  delay(200);  
+  setWiFi_CalibrationVersion();
+  #endif
+  #endif
+  return true;
 }
 
 #ifdef ESP32
@@ -651,12 +854,12 @@ String SaveSettings(bool forFactoryReset)
     return err;
   }
 
-#ifndef BUILD_MINIMAL_OTA
+#ifndef LIMIT_BUILD_SIZE
 
   // Must check this after saving, or else it is not possible to fix multiple
   // issues which can only corrected on different pages.
   if (!SettingsCheck(err)) { return err; }
-#endif // ifndef BUILD_MINIMAL_OTA
+#endif 
 
   //  }
 
@@ -683,12 +886,16 @@ String SaveSecuritySettings(bool forFactoryReset) {
                      sizeof(SecuritySettings));
 
     // Security settings are saved, may be update of WiFi settings or hostname.
-    if (!forFactoryReset && !NetworkConnected()) {
-      if (SecuritySettings.hasWiFiCredentials() && (active_network_medium == NetworkMedium_t::WIFI)) {
-        WiFiEventData.wifiConnectAttemptNeeded = true;
-        WiFi_AP_Candidates.force_reload(); // Force reload of the credentials and found APs from the last scan
-        resetWiFi();
-        AttemptWiFiConnect();
+    if (!forFactoryReset) {
+      if (SecuritySettings.hasWiFiCredentials() && (active_network_medium == ESPEasy::net::NetworkMedium_t::WIFI)) {
+        ESPEasy::net::wifi::WiFi_AP_Candidates.force_reload(); // Force reload of the credentials and found APs from the last scan
+        if (!ESPEasy::net::NetworkConnected()) {
+//          WiFiEventData.wifiConnectAttemptNeeded = true;
+          ESPEasy::net::wifi::resetWiFi();
+          String dummy;
+          ESPEasy::net::NWPluginCall(
+            NWPlugin::Function::NWPLUGIN_CREDENTIALS_CHANGED, 0, dummy);
+        }
       }
     }
   }
@@ -701,9 +908,15 @@ String SaveSecuritySettings(bool forFactoryReset) {
   // FIXME TD-er: How to check if these have changed?
   if (forFactoryReset) {
     ExtendedControllerCredentials.clear();
+#if FEATURE_STORE_CREDENTIALS_SEPARATE_FILE
+    SecuritySettings_deviceSpecific.clear();
+#endif
   }
 
   ExtendedControllerCredentials.save();
+#if FEATURE_STORE_CREDENTIALS_SEPARATE_FILE
+  SecuritySettings_deviceSpecific.save();
+#endif
 
   if (!forFactoryReset) {
     afterloadSettings();
@@ -763,13 +976,22 @@ void afterloadSettings() {
   applyFactoryDefaultPref();
   Scheduler.setEcoMode(Settings.EcoPowerMode());
   #ifdef ESP32
+  #if !defined(CORE32SOLO1) && !defined(ESP32P4)
   setCpuFrequencyMhz(Settings.EcoPowerMode() ? getCPU_MinFreqMHz() : getCPU_MaxFreqMHz());
+  #endif
   #endif // ifdef ESP32
 
   if (!Settings.UseRules) {
     eventQueue.clear();
   }
-  CheckRunningServices(); // To update changes in hostname.
+  node_time.applyTimeZone();
+  #ifdef ESP8266
+  WiFi.hostname(ESPEasy::net::NetworkCreateRFCCompliantHostname().c_str());
+  #endif
+  #ifdef ESP32
+  // FIXME TD-er: Must also update hostname on other interfaces for ESP32
+  #endif
+  ESPEasy::net::CheckRunningServices(); // To update changes in hostname.
 }
 
 /********************************************************************************************\
@@ -838,6 +1060,10 @@ String LoadSettings()
 #endif // ifndef BUILD_NO_DEBUG
 
   ExtendedControllerCredentials.load();
+#if FEATURE_STORE_CREDENTIALS_SEPARATE_FILE
+  SecuritySettings_deviceSpecific.load();
+#endif
+
 
   //  setupStaticIPconfig();
   // FIXME TD-er: Must check if static/dynamic IP was changed and trigger a reconnect? Or is a reboot better when changing those settings?
@@ -935,6 +1161,36 @@ uint8_t disableAllNotifications(uint8_t bootFailedCount) {
 #endif // if FEATURE_NOTIFIER
 
 /********************************************************************************************\
+   Disable Network Interfaces, based on bootFailedCount
+ \*********************************************************************************************/
+uint8_t disableNetwork(uint8_t bootFailedCount)
+{
+  for (ESPEasy::net::networkIndex_t i = 0; i < NETWORK_MAX && bootFailedCount > 0; ++i) {
+    if (Settings.getNetworkEnabled(i)) {
+      --bootFailedCount;
+
+      if (bootFailedCount == 0) {
+        Settings.setNetworkEnabled(i, false);
+      }
+    }
+  }
+  return bootFailedCount;
+}
+
+uint8_t disableAllNetworkss(uint8_t bootFailedCount)
+{
+    if (bootFailedCount > 0) {
+    --bootFailedCount;
+
+    for (ESPEasy::net::networkIndex_t i = 0; i < NETWORK_MAX; ++i) {
+      Settings.setNetworkEnabled(i, false);
+    }
+  }
+  return bootFailedCount;
+}
+
+
+/********************************************************************************************\
    Disable Rules, based on bootFailedCount
  \*********************************************************************************************/
 uint8_t disableRules(uint8_t bootFailedCount) {
@@ -976,7 +1232,7 @@ String LoadStringArray(SettingsType::Enum settingsType,
     #ifndef BUILD_NO_DEBUG
     return F("Invalid index for custom settings");
     #else // ifndef BUILD_NO_DEBUG
-    return F("Save error");
+    return F("Load error");
     #endif // ifndef BUILD_NO_DEBUG
   }
 
@@ -1013,7 +1269,11 @@ String LoadStringArray(SettingsType::Enum settingsType,
               // Specific string length, so we have to set the next string position.
               nextStringPos += maxStringLength;
             }
-            move_special(strings[stringCount], std::move(tmpString));
+            if (!tmpString.isEmpty()) {
+              move_special(strings[stringCount], std::move(tmpString));
+            } else {
+              free_string(strings[stringCount]);
+            }
 
             // Do not allocate tmpString on 2nd heap as byte access on 2nd heap is much slower
             // We're appending per byte, so better prefer speed for short lived objects
@@ -1186,8 +1446,7 @@ String SaveTaskSettings(taskIndex_t TaskIndex)
                      reinterpret_cast<const uint8_t *>(&ExtraTaskSettings),
                      sizeof(struct ExtraTaskSettingsStruct));
 
-#if !defined(PLUGIN_BUILD_MINIMAL_OTA) && !defined(ESP8266_1M)
-
+#ifndef LIMIT_BUILD_SIZE
     if (err.isEmpty()) {
       err = checkTaskSettings(TaskIndex);
     }
@@ -1413,6 +1672,7 @@ String SaveControllerSettings(controllerIndex_t ControllerIndex, ControllerSetti
    Load Controller settings to file system
  \*********************************************************************************************/
 String LoadControllerSettings(controllerIndex_t ControllerIndex, ControllerSettingsStruct& controller_settings) {
+  if (!validControllerIndex(ControllerIndex)) return EMPTY_STRING;
   #ifndef BUILD_NO_RAM_TRACKER
   checkRAM(F("LoadControllerSettings"));
   #endif // ifndef BUILD_NO_RAM_TRACKER
@@ -1548,7 +1808,117 @@ String LoadNotificationSettings(int NotificationIndex, uint8_t *memAddress, int 
   return LoadFromFile(SettingsType::Enum::NotificationSettings_Type, NotificationIndex, memAddress, datasize);
 }
 
-#endif // if FEATURE_NOTIFIER
+#endif
+
+
+/********************************************************************************************\
+   Handle certificate files on the file system.
+   The content will be stripped from unusable character like quotes, spaces etc.
+ \*********************************************************************************************/
+#if FEATURE_TLS
+static inline bool is_base64(char c) {
+  return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
+bool cleanupCertificate(String & certificate, bool &changed)
+{
+  changed = false;
+  // "-----BEGIN CERTIFICATE-----" positions in dash_pos[0] and dash_pos[1]
+  // "-----END CERTIFICATE-----"   positions in dash_pos[2] and dash_pos[3]
+  int dash_pos[4] = { 0 };
+  int last_pos = 0;
+  for (int i = 0; i < 4 && last_pos != -1; ++i) {
+    dash_pos[i] = certificate.indexOf(F("-----"), last_pos);
+    last_pos = dash_pos[i] + 5;
+//    addLog(LOG_LEVEL_INFO, String(F(" dash_pos: ")) + String(dash_pos[i]));
+  }
+  if (last_pos == -1) return false;
+
+  int read_pos = dash_pos[1] + 5; // next char after "-----BEGIN CERTIFICATE-----"
+  String newCert;
+  newCert.reserve((dash_pos[3] + 6) - dash_pos[0]);
+
+  // "-----BEGIN CERTIFICATE-----" 
+  newCert += certificate.substring(dash_pos[0], read_pos); 
+
+  char last_char = certificate[read_pos - 1];
+  for (; read_pos < dash_pos[2]; ++read_pos) {
+    const char c = certificate[read_pos];
+    if ((c == 'n' && last_char == '\\') || (c == '\n')) {
+      if (!newCert.endsWith(String('\n'))) {
+        newCert += '\n';
+      }
+    } else if (is_base64(c) || c == '=') {
+      newCert += c;
+    }
+    last_char = c;
+  }
+
+  // "-----END CERTIFICATE-----" 
+  newCert += certificate.substring(dash_pos[2], dash_pos[3] + 5);
+  newCert += '\n';
+
+  changed = !certificate.equals(newCert);
+  certificate = std::move(newCert);
+  return true;
+}
+
+String SaveCertificate(const String& fname, const String& certificate)
+{
+  return SaveToFile(fname.c_str(), 0, (const uint8_t *)certificate.c_str(), certificate.length() + 1);
+}
+
+String LoadCertificate(const String& fname, String& certificate, bool cleanup)
+{
+  bool changed = false;
+  if (fileExists(fname)) {
+    fs::File f = tryOpenFile(fname, "r");
+    SPIFFS_CHECK(f, fname.c_str());
+    #ifndef BUILD_NO_DEBUG
+    String log = F("LoadCertificate: ");
+    log += fname;
+    #else
+    String log = F("LoadCertificate error");
+    #endif
+
+    certificate.clear();
+
+    if (!certificate.reserve(f.size())) {
+      #ifndef BUILD_NO_DEBUG
+      log += F(" ERROR, Out of memory");
+      #endif
+      addLog(LOG_LEVEL_ERROR, log);
+      f.close();
+      return log;
+    }
+    bool done = false;
+    while (f.available() && !done) { 
+      const char c = (char)f.read(); 
+      if (c == '\0') {
+        done = true;
+      } else {
+        certificate += c;
+      }
+    }
+    f.close();
+
+    if (cleanup) {
+      if (!cleanupCertificate(certificate, changed)) {
+        certificate.clear();
+        #ifndef BUILD_NO_DEBUG
+        log += F(" ERROR, Invalid certificate format");
+        #endif
+        addLog(LOG_LEVEL_ERROR, log);
+        return log;
+      } else if (changed) {
+        //return SaveCertificate(fname, certificate);
+      }
+    }
+  }
+
+  return EMPTY_STRING;
+}
+#endif
 
 /********************************************************************************************\
    Init a file with zeros on file system
@@ -1592,7 +1962,9 @@ String InitFile(SettingsType::SettingsFileEnum file_type)
  \*********************************************************************************************/
 String SaveToFile(const char *fname, int index, const uint8_t *memAddress, int datasize)
 {
-  return doSaveToFile(fname, index, memAddress, datasize, "r+");
+  return doSaveToFile(
+    fname, index, memAddress, datasize,
+    fileExists(fname) ? "r+" : "w+");
 }
 
 String SaveToFile_trunc(const char *fname, int index, const uint8_t *memAddress, int datasize)
@@ -1612,7 +1984,7 @@ String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int
     //    return log;  // FIXME TD-er: Should this be considered a breaking error?
   }
 # endif // ifndef ESP32
-#endif // ifndef BUILD_NO_DEBUG
+#endif  // ifndef BUILD_NO_DEBUG
 
   if (index < 0) {
     #ifndef BUILD_NO_DEBUG
@@ -1642,7 +2014,9 @@ String doSaveToFile(const char *fname, int index, const uint8_t *memAddress, int
   if (f) {
     clearAllButTaskCaches();
     SPIFFS_CHECK(f,                          fname);
-    SPIFFS_CHECK(f.seek(index, fs::SeekSet), fname);
+    if (index > 0) {
+      SPIFFS_CHECK(f.seek(index, fs::SeekSet), fname);
+    }
     const uint8_t *pointerToByteToSave = memAddress;
 
     for (int x = 0; x < datasize; x++)
@@ -1777,6 +2151,52 @@ String LoadFromFile(const char *fname, int offset, uint8_t *memAddress, int data
     SPIFFS_CHECK(f.read(memAddress, datasize), fname);
   }
   f.close();
+
+  STOP_TIMER(LOADFILE_STATS);
+  delay(0);
+
+  return EMPTY_STRING;
+}
+
+String LoadFromFile(const char *fname, String& data, int offset)
+{
+  fs::File f = tryOpenFile(fname, "r");
+  SPIFFS_CHECK(f, fname);
+  #ifndef BUILD_NO_DEBUG
+  String log = F("LoadFromFile: ");
+  log += fname;
+  #else
+  String log = F("Load error");
+  #endif
+
+  if (!f || offset < 0 || (offset >= static_cast<int>(f.size()))) {
+    #ifndef BUILD_NO_DEBUG
+    log += F(" ERROR, invalid position in file");
+    #endif
+    addLog(LOG_LEVEL_ERROR, log);
+    return log;
+  }
+  delay(0);
+  START_TIMER;
+  #ifndef BUILD_NO_RAM_TRACKER
+  checkRAM(F("LoadFromFile"));
+  #endif
+  
+  SPIFFS_CHECK(f.seek(offset, fs::SeekSet),  fname);
+  if (f) {
+    if (!data.reserve(f.size() - offset)) {
+      #ifndef BUILD_NO_DEBUG
+      log += F(" ERROR, Out of memory");
+      #endif
+      addLog(LOG_LEVEL_ERROR, log);
+      f.close();
+      return log;
+    }
+
+    while (f.available()) { data += (char)f.read(); }
+    f.close();
+  }
+  
 
   STOP_TIMER(LOADFILE_STATS);
   delay(0);
@@ -2269,11 +2689,6 @@ String getPartitionTable(uint8_t pType, const String& itemSep, const String& lin
 #if FEATURE_DOWNLOAD
 String downloadFileType(const String& url, const String& user, const String& pass, FileType::Enum filetype, unsigned int filenr)
 {
-  if (!getDownloadFiletypeChecked(filetype, filenr)) {
-    // Not selected, so not downloaded
-    return F("Not Allowed");
-  }
-
   String filename = getFileName(filetype, filenr);
   String fullUrl  = joinUrlFilename(url, filename);
   String error;
@@ -2327,6 +2742,48 @@ String downloadFileType(const String& url, const String& user, const String& pas
   return error;
 }
 
+# if defined(ESP8266)
+void deleteBakFiles()
+{
+  fs::Dir dir = ESPEASY_FS.openDir("");
+
+  while (dir.next())
+  {
+    const String fname = dir.fileName();
+    if (fname.endsWith(F("_bak"))) {
+      if (tryDeleteFile(fname)) {
+        delay(1);
+      }
+    }
+  }
+}
+#endif
+#ifdef ESP32
+void deleteBakFiles()
+{
+  fs::File root = ESPEASY_FS.open("/");
+  fs::File file = root.openNextFile();
+
+  while (file)
+  {
+    if (!file.isDirectory()) {
+      const String fname = file.name();
+      // Need to open next file or else we cannot delete the file
+      file = root.openNextFile();
+
+      if (fname.endsWith(F("_bak"))) {
+        addLog(LOG_LEVEL_INFO, concat(F("Del  : Delete _bak file: "), fname));
+        if (tryDeleteFile(fname)) {
+          delay(1);
+        }
+      }
+    } else {
+      file = root.openNextFile();
+    }
+  }
+}
+#endif
+
 #endif // if FEATURE_DOWNLOAD
 
 bool validateUploadConfigDat(const uint8_t *buf) {
@@ -2340,9 +2797,10 @@ bool validateUploadConfigDat(const uint8_t *buf) {
     memcpy(reinterpret_cast<uint8_t *>(&Temp) + x, &buf[x], 1);
   }
   #ifndef BUILD_NO_DEBUG
-  addLog(LOG_LEVEL_INFO, strformat(F("Validate config.dat, Version: %d = %d, PID: %d = %d"), 
+  addLog(LOG_LEVEL_INFO, strformat(F("Validate config.dat, Version: %d = %d, PID: %d = %d"),
                                    Temp.Version, VERSION, Temp.PID, ESP_PROJECT_PID));
-  #endif
+  #endif // ifndef BUILD_NO_DEBUG
+
   if ((Temp.Version == VERSION) && (Temp.PID == ESP_PROJECT_PID)) {
     result = true;
   }

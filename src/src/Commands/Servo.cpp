@@ -59,7 +59,9 @@ const __FlashStringHelper * Command_Servo(struct EventStruct *event, const char 
       tempStatus.monitor = 0;
       tempStatus.command = 0;
       savePortStatus(key, tempStatus);
+#ifndef BUILD_NO_DEBUG
       addLog(LOG_LEVEL_INFO, concat(log, F(" Servo detached")));
+#endif
       return return_command_success_flashstr();
 
     }
@@ -89,7 +91,9 @@ const __FlashStringHelper * Command_Servo(struct EventStruct *event, const char 
     return return_command_success_flashstr();
   }
   #else // if FEATURE_SERVO
+  #ifndef BUILD_MINIMAL_OTA
   addLog(LOG_LEVEL_ERROR, F("SERVO : command not included in build"));
+  #endif
   #endif // FEATURE_SERVO
   return return_command_failed_flashstr();
 }

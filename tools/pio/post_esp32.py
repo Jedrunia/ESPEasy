@@ -21,10 +21,15 @@ Import("env")
 platform = env.PioPlatform()
 
 import sys
+import os
+import subprocess
 from os.path import join
 
-sys.path.append(join(platform.get_package_dir("tool-esptoolpy")))
-import esptool
+def normalize_paths(cmd):
+    for i, arg in enumerate(cmd):
+        if isinstance(arg, str) and '/' in arg:
+            cmd[i] = os.path.normpath(arg)
+    return cmd
 
 def esp32_create_combined_bin(source, target, env):
     print("Generating combined binary for serial flashing")
@@ -44,14 +49,14 @@ def esp32_create_combined_bin(source, target, env):
     cmd = [
         "--chip",
         chip,
-        "merge_bin",
+        "merge-bin",
         "-o",
         new_file_name,
-        "--flash_mode",
+        "--flash-mode",
         flash_mode,
-        "--flash_freq",
+        "--flash-freq",
         flash_freq,
-        "--flash_size",
+        "--flash-size",
         flash_size,
     ]
 
@@ -64,9 +69,12 @@ def esp32_create_combined_bin(source, target, env):
     print(f" - {hex(app_offset)} | {firmware_name}")
     cmd += [hex(app_offset), firmware_name]
 
-    print('Using esptool.py arguments: %s' % ' '.join(cmd))
-
-    esptool.main(cmd)
+    # print('Using esptool.py arguments: %s' % ' '.join(cmd))
+    cmdline = [env.subst("$OBJCOPY")] + normalize_paths(cmd)
+    print('Command Line: %s' % cmdline)
+    result = subprocess.run(cmdline, text=True, check=False, stdout=subprocess.DEVNULL)
+    if result.returncode != 0:
+        print(f"esptool create firmware failed with exit code: {result.returncode}")
 
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", esp32_create_combined_bin)

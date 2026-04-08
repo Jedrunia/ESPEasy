@@ -1,9 +1,8 @@
 #include "../DataStructs/ControllerSettingsStruct.h"
 
-#include "../../ESPEasy_common.h"
-
-#include "../CustomBuild/ESPEasyLimits.h"
-#include "../ESPEasyCore/ESPEasyNetwork.h"
+#include "../ESPEasyCore/ESPEasy_Log.h"
+#include "../../ESPEasy/net/ESPEasyNetwork.h"
+#include "../../ESPEasy/net/Globals/NWPlugins.h"
 #include "../Helpers/Misc.h"
 #include "../Helpers/Networking.h"
 #include "../Helpers/StringConverter.h"
@@ -14,11 +13,6 @@
 #include <WiFiClient.h>
 #include <WiFiUdp.h>
 
-ControllerSettingsStruct::ControllerSettingsStruct()
-{
-  memset(this, 0, sizeof(ControllerSettingsStruct));
-  safe_strncpy(ClientID, F(CONTROLLER_DEFAULT_CLIENTID), sizeof(ClientID));
-}
 
 void ControllerSettingsStruct::reset() {
   // Need to make sure every byte between the members is also zero
@@ -34,6 +28,10 @@ void ControllerSettingsStruct::reset() {
   ClientTimeout                                 = CONTROLLER_CLIENTTIMEOUT_DFLT;
   MustCheckReply                                = DEFAULT_CONTROLLER_MUST_CHECK_REPLY;
   SampleSetInitiator                            = INVALID_TASK_INDEX;
+  KeepAliveTime                                 = CONTROLLER_KEEP_ALIVE_TIME_DFLT;
+
+  // All these bits are already set to 0 by the memset call
+  /*
   VariousBits1.mqtt_cleanSession                = 0;
   VariousBits1.mqtt_not_sendLWT                 = 0;
   VariousBits1.mqtt_not_willRetain              = 0;
@@ -44,6 +42,9 @@ void ControllerSettingsStruct::reset() {
   VariousBits1.allowExpire                      = 0;
   VariousBits1.deduplicate                      = 0;
   VariousBits1.useLocalSystemTime               = 0;
+  VariousBits1.TLStype                          = 0;
+  VariousBits1.mqttAutoDiscovery                = 0;
+  */
 
   safe_strncpy(ClientID, F(CONTROLLER_DEFAULT_CLIENTID), sizeof(ClientID));
 }
@@ -79,6 +80,34 @@ void ControllerSettingsStruct::validate() {
   ZERO_TERMINATE(MQTTLwtTopic);
   ZERO_TERMINATE(LWTMessageConnect);
   ZERO_TERMINATE(LWTMessageDisconnect);
+  ZERO_TERMINATE(ClientID);
+  ZERO_TERMINATE(MqttAutoDiscoveryTopic);
+  ZERO_TERMINATE(MqttAutoDiscoveryConfig);
+  ZERO_TERMINATE(MqttAutoDiscoveryTrigger);
+
+
+  #if FEATURE_MQTT
+    #if FEATURE_MQTT_TLS
+    if (TLStype() == TLS_types::NoTLS) {
+      if (Port == 8883) {
+        Port = 1883;
+        addLog(LOG_LEVEL_ERROR, F("Not using TLS, but port set to secure 8883. Use port 1883 instead"));
+      }
+    } else {
+      if (Port == 1883) {
+        Port = 8883;
+        addLog(LOG_LEVEL_ERROR, F("Using TLS, but port set to insecure port 1883. Use port 8883 instead"));
+      }
+    }
+    #else
+    if (Port == 8883) {
+      // No TLS support, so when switching builds, make sure it can still work.
+      Port = 1883;
+      addLog(LOG_LEVEL_ERROR, F("Not using TLS, but port set to secure 8883. Use port 1883 instead"));
+    }
+    #endif
+  #endif
+
 }
 
 String ControllerSettingsStruct::getHost() const {
@@ -179,7 +208,7 @@ bool ControllerSettingsStruct::updateIPcache() {
     return true;
   }
 
-  if (!NetworkConnected()) { return false; }
+  if (!ESPEasy::net::NetworkConnected()) { return false; }
   IPAddress tmpIP;
 
   if (resolveHostByName(HostName, tmpIP, ClientTimeout)) {
@@ -190,6 +219,7 @@ bool ControllerSettingsStruct::updateIPcache() {
   }
   return false;
 }
+
 /*
 bool ControllerSettingsStruct::mqtt_cleanSession() const
 {
@@ -291,3 +321,70 @@ bool ControllerSettingsStruct::mqtt_cleanSession() const
   bitWrite(VariousFlags, 11, value);
 }
 */
+
+#if FEATURE_MQTT_TLS || FEATURE_HTTP_TLS
+String ControllerSettingsStruct::getCertificateFilename() const
+{
+  return getCertificateFilename(TLStype());
+}
+
+String ControllerSettingsStruct::getCertificateFilename(TLS_types tls_type) const
+{
+  String certFile = HostName;
+  if (certFile.isEmpty()) {
+    certFile = F("<HostName>");
+  }
+
+  switch (tls_type) {
+    case TLS_types::NoTLS:
+    case TLS_types::TLS_insecure:
+      return EMPTY_STRING;
+/*
+    case TLS_types::TLS_PSK:
+      certFile += F(".psk");
+      break;
+*/
+/*
+    case TLS_types::TLS_CA_CLI_CERT:
+      certFile += F(".caclicert");
+      break;
+*/
+    case TLS_types::TLS_CA_CERT:
+      certFile += F(".cacert");
+      break;
+    case TLS_types::TLS_FINGERPRINT:
+      certFile += F(".fp");
+      break;
+  }
+
+  // Only use the last 29 bytes of the filename
+  if (certFile.length() > 28) {
+    certFile = certFile.substring(certFile.length() - 28);
+  }
+  
+  return certFile;
+}
+#endif // #if FEATURE_MQTT_TLS || FEATURE_HTTP_TLS
+
+
+uint32_t ControllerSettingsStruct::getSuggestedTimeout(int index) const
+{
+  if (MustCheckReply) {
+    auto data = ESPEasy::net::getDefaultRoute_NWPluginData_static_runtime();
+    if (data) {
+      return data->getSuggestedTimeout(index, ClientTimeout);
+    }
+  }
+  return ClientTimeout;
+}
+
+UP_ControllerSettingsStruct doMakeControllerSettings()
+{
+  // Need to make sure every byte between the members is also zero
+  // Otherwise the checksum will fail and settings will be saved too often.
+  // Therefore we're using calloc instead of malloc.
+  void * calloc_ptr = special_calloc(1,sizeof(ControllerSettingsStruct)); 
+  UP_ControllerSettingsStruct T(new (calloc_ptr)  ControllerSettingsStruct());
+  if (T) T->reset();
+  return T;
+}

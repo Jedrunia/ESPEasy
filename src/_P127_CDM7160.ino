@@ -5,14 +5,19 @@
 // by: V0JT4
 // Resolves: https://github.com/letscontrolit/ESPEasy/issues/986
 //
-// Changelog:
-// 2022-06-24, tonhuisman Remove delay from init call, optimize some code
-// 2022-01-13, tonhuisman Ignore measured values > 15000: unit is still initializing
-//                        Change status from Development to Testing
-// 2021-12-31, tonhuisman Migrate plugin from ESPEasyPluginPlayground to ESPEasy repository
-// - Restructured: Use ESPEasy 'modern' code
-// - Restructured: Split into PluginDataStruct
-// - Select Plugin ID 127
+
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ *                        Updated changelog
+ * 2022-06-24 tonhuisman: Remove delay from init call, optimize some code
+ * 2022-01-13 tonhuisman: Ignore measured values > 15000: unit is still initializing
+ *                        Change status from Development to Testing
+ * 2021-12-31 tonhuisman: Migrate plugin from ESPEasyPluginPlayground to ESPEasy repository
+ *                        - Restructured: Use ESPEasy 'modern' code
+ *                        - Restructured: Split into PluginDataStruct
+ *                        - Select Plugin ID 127
+ */
+
 
 #include "_Plugin_Helper.h"
 #ifdef USES_P127
@@ -35,18 +40,16 @@ boolean Plugin_127(uint8_t function, struct EventStruct *event, String& string)
   switch (function) {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_127;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number           = PLUGIN_ID_127;
+      dev.Type             = DEVICE_TYPE_I2C;
+      dev.VType            = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption    = true;
+      dev.ValueCount       = 1;
+      dev.SendDataOption   = true;
+      dev.TimerOption      = true;
+      dev.GlobalSyncOption = true;
+      dev.PluginStats      = true;
       break;
     }
 
@@ -61,6 +64,14 @@ boolean Plugin_127(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_127));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      success = getDiscoveryVType(event, Plugin_QueryVType_CO2, 255, event->Par5);;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -151,8 +162,8 @@ boolean Plugin_127(uint8_t function, struct EventStruct *event, String& string)
 
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
         addLogMove(LOG_LEVEL_INFO, strformat(F("CDM7160: Address: 0x%02x: CO2 ppm: %d, alt: %d, comp: %d"),
-                                             P127_CONFIG_I2C_ADDRESS, 
-                                             UserVar[event->BaseVarIndex], 
+                                             P127_CONFIG_I2C_ADDRESS,
+                                             UserVar[event->BaseVarIndex],
                                              P127_data->getAltitude(),
                                              P127_data->getCompensation()));
       }

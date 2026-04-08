@@ -120,6 +120,8 @@
 // # define ADAGFX_FONTS_EXTRA_20PT_INCLUDED // 1 extra 20pt fonts, should probably only be enabled in a private custom build, adds ~5.3 kB
 // # define ADAGFX_FONTS_EXTRA_24PT_INCLUDED // 2 extra 24pt fonts, should probably only be enabled in a private custom build, adds ~11.1 kB
 
+/* Marker: A) Add font-size group define  *DON'T REMOVE* */
+
 // To enable/disable 8pt fonts separately: (will only be enabled if ADAGFX_FONTS_EXTRA_5PT_INCLUDED is defined)
 # define ADAGFX_FONTS_EXTRA_5PT_TOMTHUMB
 
@@ -170,6 +172,8 @@
 // To enable/disable 24pt fonts separately: (will only be enabled if ADAGFX_FONTS_EXTRA_24PT_INCLUDED is defined)
 # define ADAGFX_FONTS_EXTRA_24PT_LCD14COND
 # define ADAGFX_FONTS_EXTRA_24PT_SEVENSEG_B
+
+/* Marker: B) (Add new font defines above this marker, for readability, grouped per font-size)  *DON'T REMOVE* */
 
 # ifdef LIMIT_BUILD_SIZE
 #  if ADAGFX_FONTS_INCLUDED
@@ -440,6 +444,10 @@ String AdaGFXcolorToString(const uint16_t        & color,
 # if ADAGFX_SUPPORT_7COLOR
 uint16_t AdaGFXrgb565ToColor7(const uint16_t& color); // Convert rgb565 color to 7-color
 # endif // if ADAGFX_SUPPORT_7COLOR
+uint32_t AdaGFXrgb565ToRgb888(uint16_t rgb565);
+String   AdaGFXrgb565ToWebColor(uint16_t rgb565);
+uint16_t AdaGFXrgb888ToRgb565(uint32_t rgb888);
+
 void     AdaGFXFormLineSpacing(const __FlashStringHelper *id,
                                uint8_t                    selectedIndex);
 String   AdaGFXgetFontName(uint8_t fontId,

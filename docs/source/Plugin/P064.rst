@@ -13,7 +13,9 @@ Type: |P064_type|
 
 Name: |P064_name|
 
-Status: |P064_status|
+Status ESP32: |P064_status|
+
+Status ESP8266: |P064_status_lb|
 
 GitHub: |P064_github|_
 
@@ -87,6 +89,8 @@ Event generation
 ^^^^^^^^^^^^^^^^
 
 * **Separate Gesture events**: When enabled will generate a ``<TaskName>#Swipe=<gesture>`` event (see below), independent from **Interval**. This allows gestures to be handled independently from measuring the proximity and ambient light, or R/G/B colors. The ``Gesture`` value will be updated for every gesture detected, but the Values events will only trigger on Interval, if this checkbox is enabled.
+
+.. include:: DataAcquisition.repl
 
 Values
 ^^^^^^

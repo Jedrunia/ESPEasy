@@ -40,14 +40,17 @@ else:
     "-DFEATURE_DEFINE_SERIAL_CONSOLE_PORT=0",
     "-DFEATURE_ESPEASY_P2P=1",
     "-DFEATURE_CUSTOM_PROVISIONING",
-    "-DDISABLE_SC16IS752_SPI"
+    "-DDISABLE_SC16IS752_SPI",
+    "-DFEATURE_MQTT_TLS=0",
+    "-DFEATURE_HTTP_TLS=0",
+    "-DFEATURE_EMAIL_TLS=0"
   ]
 
 
 
 my_flags = env.ParseFlags(env['BUILD_FLAGS'])
 my_defines = my_flags.get("CPPDEFINES")
-env.Append(BUILD_FLAGS=custom_defines)
+env.Append(CXXFLAGS=custom_defines)
 #defines = {k: v for (k, v) in my_defines}
 
 print("\u001b[32m Custom PIO configuration check \u001b[0m")

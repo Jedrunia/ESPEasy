@@ -2,12 +2,14 @@
 
 
 #include "../../ESPEasy-Globals.h"
+#include "../../ESPEasy/net/ESPEasyNetwork.h"
+#include "../../ESPEasy/net/Globals/NWPlugins.h"
+#include "../../ESPEasy/net/wifi/ESPEasyWifi.h"
 #include "../Commands/ExecuteCommand.h"
+#include "../Commands/InternalCommands_decoder.h"
 #include "../DataStructs/TimingStats.h"
-#include "../ESPEasyCore/ESPEasyNetwork.h"
-#include "../ESPEasyCore/ESPEasyWifi_ProcessEvent.h"
-#include "../ESPEasyCore/ESPEasy_backgroundtasks.h"
 #include "../ESPEasyCore/ESPEasy_Log.h"
+#include "../ESPEasyCore/ESPEasy_backgroundtasks.h"
 #include "../Globals/ESPEasy_Scheduler.h"
 #include "../Globals/EventQueue.h"
 #include "../Globals/RTC.h"
@@ -21,26 +23,24 @@
 #include "../Helpers/Networking.h"
 #include "../Helpers/PeriodicalActions.h"
 #include "../Helpers/StringConverter.h"
-
-
-#include "../Commands/InternalCommands_decoder.h"
+#include "../WebServer/ESPEasy_WebServer.h"
 
 void updateLoopStats() {
   ++loopCounter;
   ++loopCounter_full;
 
   if (lastLoopStart == 0) {
-    lastLoopStart = getMicros64();
+    lastLoopStart = micros();
     return;
   }
-  const int64_t usecSince = usecPassedSince(lastLoopStart);
+  const int32_t usecSince = usecPassedSince_fast(lastLoopStart);
 
   #if FEATURE_TIMING_STATS
   ADD_TIMER_STAT(LOOP_STATS, usecSince);
   #endif // if FEATURE_TIMING_STATS
 
   loop_usec_duration_total += usecSince;
-  lastLoopStart             = getMicros64();
+  lastLoopStart             = micros();
 
   if ((usecSince <= 0) || (usecSince > 10000000)) {
     return; // No loop should take > 10 sec.
@@ -72,12 +72,16 @@ void ESPEasy_loop()
 
   updateLoopStats();
 
-  handle_unprocessedNetworkEvents();
+//  ESPEasy::net::wifi::loopWiFi();
 
-  bool firstLoopConnectionsEstablished = NetworkConnected() && firstLoop;
+//  ESPEasy::net::wifi::handle_unprocessedNetworkEvents();
+
+  bool firstLoopConnectionsEstablished = firstLoop && ESPEasy::net::NetworkConnected();
 
   if (firstLoopConnectionsEstablished) {
+    #ifndef LIMIT_BUILD_SIZE
     addLog(LOG_LEVEL_INFO, F("firstLoopConnectionsEstablished"));
+    #endif
     firstLoop               = false;
     timerAwakeFromDeepSleep = millis(); // Allow to run for "awake" number of seconds, now we have wifi.
 
@@ -100,6 +104,11 @@ void ESPEasy_loop()
     sendSysInfoUDP(1);
     #endif
   }
+
+  setWebserverRunning(ESPEasy::net::NWPluginCall(NWPlugin::Function::NWPLUGIN_WEBSERVER_SHOULD_RUN));
+  // ESPEasy::net::processNetworkEvents();
+
+#if FEATURE_I2C
 #if FEATURE_CLEAR_I2C_STUCK
   if (Settings.EnableClearHangingI2Cbus())
   {
@@ -134,6 +143,7 @@ void ESPEasy_loop()
         break;
     }
   }
+#endif
 #endif
 
 

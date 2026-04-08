@@ -18,6 +18,7 @@
 # include "src/Controller_struct/C018_data_struct.h"
 # include "src/DataTypes/ESPEasy_plugin_functions.h"
 # include "src/Globals/CPlugins.h"
+# include "src/Helpers/_CPlugin_Helper_LoRa.h"
 # include "src/Helpers/_Plugin_Helper_serial.h"
 # include "src/Helpers/StringGenerator_GPIO.h"
 # include "src/WebServer/Markup.h"
@@ -109,25 +110,32 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
         protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(event->ControllerIndex);
         html_add_script(false);
         addHtml(F("function joinChanged(elem){ var styleOTAA = elem.value == 0 ? '' : 'none'; var styleABP = elem.value == 1 ? '' : 'none';"));
-        addHtml(c018_add_joinChanged_script_element_line(getControllerParameterInternalName(ProtocolIndex,
+                LoRa_Helper::add_joinChanged_script_element_line(getControllerParameterInternalName(ProtocolIndex,
                                                                                             ControllerSettingsStruct::CONTROLLER_USER),
-                                                         true));
-        addHtml(c018_add_joinChanged_script_element_line(getControllerParameterInternalName(ProtocolIndex,
+                                                         LoRa_Helper::LoRaWAN_JoinMethod::OTAA);
+        LoRa_Helper::add_joinChanged_script_element_line(getControllerParameterInternalName(ProtocolIndex,
                                                                                             ControllerSettingsStruct::CONTROLLER_PASS),
-                                                         true));
-        addHtml(c018_add_joinChanged_script_element_line(F("deveui"), true));
-        addHtml(c018_add_joinChanged_script_element_line(F("deveui_note"), true));
+                                                         LoRa_Helper::LoRaWAN_JoinMethod::OTAA);
+        LoRa_Helper::add_joinChanged_script_element_line(F("deveui"), LoRa_Helper::LoRaWAN_JoinMethod::OTAA);
+        LoRa_Helper::add_joinChanged_script_element_line(F("deveui_note"), LoRa_Helper::LoRaWAN_JoinMethod::OTAA);
 
-        addHtml(c018_add_joinChanged_script_element_line(F("devaddr"), false));
-        addHtml(c018_add_joinChanged_script_element_line(F("nskey"), false));
-        addHtml(c018_add_joinChanged_script_element_line(F("appskey"), false));
+        LoRa_Helper::add_joinChanged_script_element_line(F("devaddr"), LoRa_Helper::LoRaWAN_JoinMethod::ABP);
+        LoRa_Helper::add_joinChanged_script_element_line(F("nskey"), LoRa_Helper::LoRaWAN_JoinMethod::ABP);
+        LoRa_Helper::add_joinChanged_script_element_line(F("appskey"), LoRa_Helper::LoRaWAN_JoinMethod::ABP);
         addHtml('}');
         html_add_script_end();
       }
 
       {
         // Keep this object in a small scope so we can destruct it as soon as possible again.
-        std::shared_ptr<C018_ConfigStruct> customConfig(new (std::nothrow) C018_ConfigStruct);
+
+        constexpr unsigned size = sizeof(C018_ConfigStruct);
+        void *ptr               = special_calloc(1, size);
+      
+        if (ptr == nullptr) {
+          break;
+        }
+        UP_C018_ConfigStruct  customConfig(new (ptr) C018_ConfigStruct);
 
         if (!customConfig) {
           break;
@@ -140,7 +148,13 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
     }
     case CPlugin::Function::CPLUGIN_WEBFORM_SAVE:
     {
-      std::shared_ptr<C018_ConfigStruct> customConfig(new (std::nothrow) C018_ConfigStruct);
+      constexpr unsigned size = sizeof(C018_ConfigStruct);
+      void *ptr               = special_calloc(1, size);
+    
+      if (ptr == nullptr) {
+        break;
+      }
+      UP_C018_ConfigStruct  customConfig(new (ptr) C018_ConfigStruct);
 
       if (customConfig) {
         customConfig->webform_save();
@@ -186,7 +200,14 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
 
       if (C018_data != nullptr) {
         {
-          std::unique_ptr<C018_queue_element> element(new (std::nothrow) C018_queue_element(event, C018_data->getSampleSetCount(event->TaskIndex)));
+          constexpr unsigned size = sizeof(C018_queue_element);
+          void *ptr               = special_calloc(1, size);
+        
+          if (ptr == nullptr) {
+            break;
+          }
+    
+          UP_C018_queue_element  element(new (ptr) C018_queue_element(event, C018_data->getSampleSetCount(event->TaskIndex)));
           success = C018_DelayHandler->addToQueue(std::move(element));
           Scheduler.scheduleNextDelayQueue(SchedulerIntervalTimer_e::TIMER_C018_DELAY_QUEUE,
                                            C018_DelayHandler->getNextScheduleTime());
@@ -205,8 +226,7 @@ bool CPlugin_018(CPlugin::Function function, struct EventStruct *event, String& 
     case CPlugin::Function::CPLUGIN_PROTOCOL_RECV:
     {
       // FIXME TD-er: WHen should this be scheduled?
-      // protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(event->ControllerIndex);
-      // schedule_controller_event_timer(ProtocolIndex, CPlugin::Function::CPLUGIN_PROTOCOL_RECV, event);
+      // schedule_controller_event_timer(event->ControllerIndex, CPlugin::Function::CPLUGIN_PROTOCOL_RECV, event);
       break;
     }
 
@@ -274,11 +294,19 @@ bool C018_init(struct EventStruct *event) {
     C018_data = nullptr;
   }
 
+  {
+    constexpr unsigned size = sizeof(C018_data_struct);
+    void *ptr               = special_calloc(1, size);
 
-  C018_data = new (std::nothrow) C018_data_struct;
+    if (ptr == nullptr) {
+      return false;
+    }
 
-  if (C018_data == nullptr) {
-    return false;
+    C018_data = new (ptr) C018_data_struct;
+
+    if (C018_data == nullptr) {
+      return false;
+    }
   }
   {
     // Allocate ControllerSettings object in a scope, so we can destruct it as soon as possible.
@@ -296,7 +324,13 @@ bool C018_init(struct EventStruct *event) {
     Port               = ControllerSettings->Port;
   }
 
-  std::shared_ptr<C018_ConfigStruct> customConfig(new (std::nothrow) C018_ConfigStruct);
+  constexpr unsigned size = sizeof(C018_ConfigStruct);
+  void *ptr               = special_calloc(1, size);
+
+  if (ptr == nullptr) {
+    return false;
+  }
+  UP_C018_ConfigStruct  customConfig(new (ptr) C018_ConfigStruct);
 
   if (!customConfig) {
     return false;
@@ -356,7 +390,7 @@ bool C018_init(struct EventStruct *event) {
 
 // Uncrustify may change this into multi line, which will result in failed builds
 // *INDENT-OFF*
-bool do_process_c018_delay_queue(int controller_number, const Queue_element_base& element_base, ControllerSettingsStruct& ControllerSettings) {
+bool do_process_c018_delay_queue(cpluginID_t cpluginID, const Queue_element_base& element_base, ControllerSettingsStruct& ControllerSettings) {
   const C018_queue_element& element = static_cast<const C018_queue_element&>(element_base);
 // *INDENT-ON*
   uint8_t pl           = (element.packed.length() / 2);

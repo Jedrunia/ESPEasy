@@ -17,7 +17,7 @@
 extern "C" {
 uint8_t temprature_sens_read();
 }
-#  elif defined(ESP32C2) || defined(ESP32C3) || defined(ESP32C6) || defined(ESP32S2) || defined(ESP32S3)
+#  elif defined(ESP32C2) || defined(ESP32C3) || defined(ESP32C5) || defined(ESP32C6) || defined(ESP32C61) || defined(ESP32S2) || defined(ESP32S3) || defined(ESP32P4)
 #   if ESP_IDF_VERSION_MAJOR < 5
 #    include <driver/temp_sensor.h>
 
@@ -49,7 +49,8 @@ esp_err_t do_read_internal_temperature(float& celsius) {
     --retries;
   }
 #   ifndef BUILD_NO_DEBUG
-  addLog(LOG_LEVEL_DEBUG, concat(F("ESP32: Raw temperature value: "), raw));
+
+  //  addLog(LOG_LEVEL_DEBUG, concat(F("ESP32: Raw temperature value: "), raw));
 #   endif // ifndef BUILD_NO_DEBUG
 
   if (raw != 128) {
@@ -61,7 +62,7 @@ esp_err_t do_read_internal_temperature(float& celsius) {
   return result;
 }
 
-#  elif defined(ESP32C2) || defined(ESP32C3) || defined(ESP32C6) || defined(ESP32S2) || defined(ESP32S3)
+#  elif defined(ESP32C2) || defined(ESP32C3) || defined(ESP32C5) || defined(ESP32C6) || defined(ESP32C61) || defined(ESP32S2) || defined(ESP32S3) || defined(ESP32P4)
 
 esp_err_t do_read_internal_temperature(float& celsius) {
   esp_err_t result = ESP_FAIL;
@@ -152,6 +153,10 @@ esp_err_t do_read_internal_temperature(float& celsius) {
 
   if (ESP_OK == result) {
     result = temperature_sensor_get_celsius(temp_sensor, &celsius);
+
+    if (result == ESP_FAIL) {
+      must_reinstall = true;
+    }
 
     // FIXME TD-er: What to do when result == ESP_FAIL (can be indication of out-of-range)
     if (celsius < (range_min + 10)) {

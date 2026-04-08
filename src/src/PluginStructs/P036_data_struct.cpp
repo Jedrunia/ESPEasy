@@ -2,7 +2,7 @@
 
 #ifdef USES_P036
 
-# include "../ESPEasyCore/ESPEasyNetwork.h"
+# include "../../ESPEasy/net/ESPEasyNetwork.h"
 # include "../Globals/RTC.h"
 # include "../Helpers/ESPEasy_Storage.h"
 # include "../Helpers/Memory.h"
@@ -19,6 +19,10 @@
 # include <OLED_SSD1306_SH1106_images.h>
 
 void P036_LineContent::loadDisplayLines(taskIndex_t taskIndex, uint8_t LoadVersion) {
+  # ifdef USE_SECOND_HEAP
+  HeapSelectIram ephemeral;
+  # endif // ifdef USE_SECOND_HEAP
+
   if (LoadVersion == 0) {
     // read data of version 0 (up to 22.11.2019)
     String DisplayLinesV0[P36_Nlines];                                           // used to load the CustomTaskSettings for V0
@@ -51,15 +55,13 @@ String P036_LineContent::saveDisplayLines(taskIndex_t taskIndex) {
   if (FreeMem() > 8000) {
     // Write in one single chunk.
     tDisplayLines_storage_full *tmp = nullptr;
-    # ifdef USE_SECOND_HEAP
-    {
-      HeapSelectIram ephemeral;
-      tmp = new (std::nothrow) tDisplayLines_storage_full;
-    }
-    # endif // ifdef USE_SECOND_HEAP
 
-    if (tmp == nullptr) {
-      tmp = new (std::nothrow) tDisplayLines_storage_full;
+    // Try to allocate in PSRAM or 2nd heap if possible
+    constexpr unsigned size = sizeof(tDisplayLines_storage_full);
+    void *ptr               = special_calloc(1, size);
+
+    if (ptr) {
+      tmp = new (ptr) tDisplayLines_storage_full;
     }
 
     if (tmp != nullptr) {
@@ -194,7 +196,12 @@ bool P036_data_struct::init(taskIndex_t      taskIndex,
                             uint8_t          Contrast,
                             uint16_t         DisplayTimer,
                             ePageScrollSpeed ScrollSpeed,
-                            uint8_t          NrLines) {
+                            uint8_t          NrLines
+                            # if             P036_FLAG_HIDE_LOGO
+                            ,
+                            bool             HideLogo
+                            # endif // if P036_FLAG_HIDE_LOGO
+                            ) {
   reset();
 
   lastWiFiState       = P36_WIFI_STATE_UNSET;
@@ -231,10 +238,13 @@ bool P036_data_struct::init(taskIndex_t      taskIndex,
   }
 
   {
-    # ifdef USE_SECOND_HEAP
-    HeapSelectIram ephemeral;
-    # endif // ifdef USE_SECOND_HEAP
-    LineContent = new (std::nothrow) P036_LineContent();
+    // Try to allocate in PSRAM or 2nd heap if possible
+    constexpr unsigned size = sizeof(P036_LineContent);
+    void *ptr               = special_calloc(1, size);
+
+    if (ptr) {
+      LineContent = new (ptr) P036_LineContent();
+    }
   }
 
   if (isInitialized()) {
@@ -258,8 +268,14 @@ bool P036_data_struct::init(taskIndex_t      taskIndex,
     setContrast(Contrast);
 
     // Display the device name, logo, time and wifi
-    display_logo();
-    update_display();
+    # if             P036_FLAG_HIDE_LOGO
+
+    if (!HideLogo)
+    # endif // if P036_FLAG_HIDE_LOGO
+    {
+      display_logo();
+      update_display();
+    }
 
     // Initialize frame counter
     frameCounter                    = 0;
@@ -279,9 +295,21 @@ bool P036_data_struct::init(taskIndex_t      taskIndex,
     prepare_pagescrolling(ScrollSpeed, NrLines);
   }
 
-  bRunning = NetworkConnected();
+  bRunning = ESPEasy::net::NetworkConnected();
 
   return isInitialized();
+}
+
+void P036_data_struct::CleanEscapeCharacters(String& str, const bool ForHeaderOnly = false)
+{
+  stripEscapeCharacters(str);
+
+  /***** WILL BE DEPRECATED - DO NOT USE *****/
+  if (ForHeaderOnly) {
+    str.replace("$", "%"); // Allow system vars to be passed to header in by using $ instead of %
+  }
+
+  /***** WILL BE DEPRECATED - DO NOT USE *****/
 }
 
 const char p036_subcommands[] PROGMEM = "display|frame"
@@ -329,7 +357,8 @@ bool P036_data_struct::plugin_write(struct EventStruct *event, const String& str
   uint8_t eventId     = 0;
 
   const String subcommand = parseString(string, 2);
-  int LineNo              = event->Par1;
+  int  LineNo             = event->Par1;
+  bool Parsing            = (LineNo >= 0);
 
       # if P036_SEND_EVENTS
   const bool sendEvents = bitRead(P036_FLAGS_0, P036_FLAG_SEND_EVENTS); // Bit 28 Send Events
@@ -338,32 +367,42 @@ bool P036_data_struct::plugin_write(struct EventStruct *event, const String& str
   int command_i = GetCommandCode(subcommand.c_str(), p036_subcommands);
 
   if (command_i == -1) {
+    String parseString = parseStringKeepCaseNoTrim(string, 3);
+
+    if (!Parsing) {
+      LineNo = -LineNo;
+      CleanEscapeCharacters(parseString); // Allow system vars and task values to be passed to the line
+    }
+
     if ((LineNo > 0) && (LineNo <= P36_Nlines)) {
       // content functions
       success = true;
       String *currentLine = &LineContent->DisplayLinesV1[LineNo - 1].Content;
-      *currentLine = parseStringKeepCaseNoTrim(string, 3);
-      *currentLine = P36_parseTemplate(*currentLine, LineNo - 1);
+      *currentLine = parseString;
 
-          # if P036_ENABLE_TICKER
+      if (Parsing) {
+        *currentLine = P36_parseTemplate(*currentLine, LineNo - 1);
 
-      if (!bUseTicker)
-          # endif // if P036_ENABLE_TICKER
-      {
-        // calculate Pix length of new content, not necessary for ticker
-        uint16_t PixLength = CalcPixLength(LineNo - 1);
+        # if P036_ENABLE_TICKER
 
-        if (PixLength > 255) {
-          addHtmlError(strformat(F("Pixel length of %d too long for line! Max. 255 pix!"), PixLength));
+        if (!bUseTicker)
+        # endif // if P036_ENABLE_TICKER
+        {
+          // calculate Pix length of new content, not necessary for ticker
+          uint16_t PixLength = CalcPixLength(LineNo - 1);
 
-          const unsigned int strlen = currentLine->length();
+          if (PixLength > 255) {
+            addHtmlError(strformat(F("Pixel length of %d too long for line! Max. 255 pix!"), PixLength));
 
-          if (strlen > 0) {
-            const float fAvgPixPerChar       = static_cast<float>(PixLength) / strlen;
-            const unsigned int iCharToRemove = ceilf((static_cast<float>(PixLength - 255)) / fAvgPixPerChar);
+            const unsigned int strlen = currentLine->length();
 
-            // shorten string because OLED controller can not handle such long strings
-            *currentLine = currentLine->substring(0, strlen - iCharToRemove);
+            if (strlen > 0) {
+              const float fAvgPixPerChar       = static_cast<float>(PixLength) / strlen;
+              const unsigned int iCharToRemove = ceilf((static_cast<float>(PixLength - 255)) / fAvgPixPerChar);
+
+              // shorten string because OLED controller can not handle such long strings
+              *currentLine = currentLine->substring(0, strlen - iCharToRemove);
+            }
           }
         }
       }
@@ -578,14 +617,16 @@ bool P036_data_struct::plugin_write(struct EventStruct *event, const String& str
       case p036_subcommands_e::userdef1:
       {
         userDef1 = parseStringKeepCase(string, 3);
-        userDef1.replace('$', '%'); // Allow system vars to be passed in by using $ instead of %
+        CleanEscapeCharacters(userDef1, true); // Allow system vars and task values to be passed to the
+        // user defined header1
         break;
       }
 
       case p036_subcommands_e::userdef2:
       {
         userDef2 = parseStringKeepCase(string, 3);
-        userDef2.replace('$', '%'); // Allow system vars to be passed in by using $ instead of %
+        CleanEscapeCharacters(userDef2, true); // Allow system vars and task values to be passed to the
+        // user defined header2
         break;
       }
       # endif // if P036_USERDEF_HEADERS
@@ -698,11 +739,15 @@ void P036_data_struct::setOrientationRotated(bool rotated) {
 void P036_data_struct::RestoreLineContent(taskIndex_t taskIndex,
                                           uint8_t     LoadVersion,
                                           uint8_t     LineNo) {
-  # ifdef USE_SECOND_HEAP
-  HeapSelectIram ephemeral;
-  # endif // ifdef USE_SECOND_HEAP
+  // Try to allocate in PSRAM or 2nd heap if possible
+  constexpr unsigned size = sizeof(P036_LineContent);
+  void *ptr               = special_calloc(1, size);
 
-  P036_LineContent *TempContent = new (std::nothrow) P036_LineContent();
+  if (!ptr) {
+    return;
+  }
+
+  P036_LineContent *TempContent = new (ptr) P036_LineContent();
 
   if (TempContent != nullptr) {
     TempContent->loadDisplayLines(taskIndex, LoadVersion);
@@ -735,21 +780,22 @@ String P036_data_struct::create_display_header_text(eHeaderContent iHeaderConten
 {
   String newString, strHeader;
   const __FlashStringHelper *newString_f = F("%sysname%");
-  bool use_newString_f = true;
+  bool use_newString_f                   = true;
 
   switch (iHeaderContent) {
     case eHeaderContent::eSSID:
 
-      if (NetworkConnected()) {
-        strHeader = WiFi.SSID();
+      if (ESPEasy::net::NetworkConnected()) {
+        strHeader       = WiFi.SSID();
         use_newString_f = false;
       }
-//      else {
-//        newString_f = F("%sysname%");
-//      }
+
+      //      else {
+      //        newString_f = F("%sysname%");
+      //      }
       break;
     case eHeaderContent::eSysName:
-//      newString_f = F("%sysname%");
+      //      newString_f = F("%sysname%");
       break;
     case eHeaderContent::eTime:
       newString_f = F("%systime%");
@@ -786,8 +832,7 @@ String P036_data_struct::create_display_header_text(eHeaderContent iHeaderConten
       break;
     case eHeaderContent::ePageNo:
       use_newString_f = false;
-      strHeader  = F("page ");
-      strHeader += (currentFrameToDisplay + 1);
+      strHeader       = strformat(F("page %d"), currentFrameToDisplay + 1);
 
       if (MaxFramesToDisplay != 0xFF) {
         strHeader += F("/");
@@ -797,11 +842,11 @@ String P036_data_struct::create_display_header_text(eHeaderContent iHeaderConten
     # if P036_USERDEF_HEADERS
     case eHeaderContent::eUserDef1:
       use_newString_f = false;
-      newString = userDef1;
+      newString       = userDef1;
       break;
     case eHeaderContent::eUserDef2:
       use_newString_f = false;
-      newString = userDef2;
+      newString       = userDef2;
       break;
     # endif // if P036_USERDEF_HEADERS
     case eHeaderContent::eNone:
@@ -831,10 +876,11 @@ void P036_data_struct::display_header() {
     return;
   }
 
-  const eHeaderContent iHeaderContent = ((HeaderContentAlternative == HeaderContent) || !bAlternativHeader) 
+  const eHeaderContent iHeaderContent = ((HeaderContentAlternative == HeaderContent) || !bAlternativHeader)
     ? HeaderContent
     : HeaderContentAlternative;
   const String title = create_display_header_text(iHeaderContent);
+
   display_title(title);
 
   // Display time and wifibars both clear area below, so paint them after the title.
@@ -855,7 +901,23 @@ void P036_data_struct::display_time() {
     return;
   }
 
-  const String dtime = SystemVariables::getSystemVariable(SystemVariables::SYSTIME);
+  # if P036_ENABLE_TIME_FORMAT
+  SystemVariables::Enum timeOptions[] = {
+    SystemVariables::SYSTIME,
+    SystemVariables::SYSTM_HM_0,
+    SystemVariables::SYSTIME_AM_0,
+    SystemVariables::SYSTM_HM_AM_0,
+  };
+  # endif // if P036_ENABLE_TIME_FORMAT
+
+  const String dtime = SystemVariables::getSystemVariable(
+    # if P036_ENABLE_TIME_FORMAT
+    timeOptions[timeFormat]
+    # else // if P036_ENABLE_TIME_FORMAT
+    SystemVariables::SYSTIME
+    # endif // if P036_ENABLE_TIME_FORMAT
+    );
+
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->setFont(getArialMT_Plain_10());
   display->setColor(BLACK);
@@ -876,6 +938,7 @@ void P036_data_struct::display_title(const String& title) {
     return;
   }
   display->setFont(getArialMT_Plain_10());
+
   if (getDisplaySizeSettings(disp_resolution).Width == P36_MaxDisplayWidth) {
     display->setTextAlignment(TEXT_ALIGN_CENTER);
     display->drawString(P36_DisplayCentre, TopLineOffset, title);
@@ -1019,7 +1082,7 @@ tIndividualFontSettings P036_data_struct::CalculateIndividualFontSettings(uint8_
 
   for (uint8_t i = LineNo; i < P36_Nlines; ++i) {
     // calculate individual font settings
-    uint8_t lFontIndex             = FontIndex;
+    uint8_t lFontIndex            = FontIndex;
     const eModifyFont iModifyFont =
       static_cast<eModifyFont>(get3BitFromUL(LineContent->DisplayLinesV1[i].ModifyLayout, P036_FLAG_ModifyLayout_Font));
 
@@ -1028,8 +1091,8 @@ tIndividualFontSettings P036_data_struct::CalculateIndividualFontSettings(uint8_
 
         if (ScrollingPages.linesPerFrameDef > 1) {
           // Font can only be enlarged if more than 1 line is displayed
-          if (lFontIndex > IdxForBiggestFont) { 
-            lFontIndex--; 
+          if (lFontIndex > IdxForBiggestFont) {
+            lFontIndex--;
           } else {
             lFontIndex = IdxForBiggestFont;
           }
@@ -1913,7 +1976,7 @@ bool P036_data_struct::display_wifibars() {
     return false;
   }
 
-  const bool connected    = NetworkConnected();
+  const bool connected    = ESPEasy::net::NetworkConnected();
   const int  nbars_filled = (WiFi.RSSI() + 100) / 12; // all bars filled if RSSI better than -46dB
   const int  newState     = connected ? nbars_filled : P36_WIFI_STATE_NOT_CONNECTED;
 
@@ -1938,7 +2001,7 @@ bool P036_data_struct::display_wifibars() {
   display->fillRect(x, y, size_x, size_y);
   display->setColor(WHITE);
 
-  if (NetworkConnected()) {
+  if (ESPEasy::net::NetworkConnected()) {
     for (uint8_t ibar = 0; ibar < nbars; ++ibar) {
       const int16_t height = size_y * (ibar + 1) / nbars;
       const int16_t xpos   = x + ibar * width;
@@ -2157,7 +2220,7 @@ void P036_data_struct::P036_DisplayPage(struct EventStruct *event)
 
     const bool bScrollWithoutWifi = bitRead(PCONFIG_LONG(0), 24); // Bit 24
     const bool bScrollLines       = bitRead(PCONFIG_LONG(0), 17); // Bit 17
-    bRunning           = NetworkConnected() || bScrollWithoutWifi;
+    bRunning           = ESPEasy::net::NetworkConnected() || bScrollWithoutWifi;
     bLineScrollEnabled = ((bScrollLines
                            # if P036_ENABLE_TICKER
                            || bUseTicker

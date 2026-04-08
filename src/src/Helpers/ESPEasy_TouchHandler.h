@@ -123,12 +123,12 @@
 # define TOUCH_FLAGS_SWAP_LEFT_RIGHT    19 // Swaps Left and Right, Up and Down swipe directions for menu actions
 # define TOUCH_FLAGS_IGNORE_TOUCH       20 // Disable touch, use for object/button features only
 
-# define TOUCH_GET_VALUE_X    UserVar.getInt32(event->TaskIndex, 0)
-# define TOUCH_GET_VALUE_Y    UserVar.getInt32(event->TaskIndex, 1)
-# define TOUCH_GET_VALUE_Z    UserVar.getInt32(event->TaskIndex, 2)
-# define TOUCH_SET_VALUE_X(N) UserVar.setInt32(event->TaskIndex, 0, N)
-# define TOUCH_SET_VALUE_Y(N) UserVar.setInt32(event->TaskIndex, 1, N)
-# define TOUCH_SET_VALUE_Z(N) UserVar.setInt32(event->TaskIndex, 2, N)
+# define TOUCH_GET_VALUE_X    UserVar.getFloat(event->TaskIndex, 0)
+# define TOUCH_GET_VALUE_Y    UserVar.getFloat(event->TaskIndex, 1)
+# define TOUCH_GET_VALUE_Z    UserVar.getFloat(event->TaskIndex, 2)
+# define TOUCH_SET_VALUE_X(N) UserVar.setFloat(event->TaskIndex, 0, N)
+# define TOUCH_SET_VALUE_Y(N) UserVar.setFloat(event->TaskIndex, 1, N)
+# define TOUCH_SET_VALUE_Z(N) UserVar.setFloat(event->TaskIndex, 2, N)
 
 # define TOUCH_TS_ROTATION              0   // Rotation 0-3 = 0/90/180/270 degrees
 # define TOUCH_TS_SEND_XY             true  // Enable/Disable X/Y events
@@ -232,6 +232,7 @@ struct tTouch_Point
 // For touch objects we store a name, 2 coordinates, flags and other options
 struct tTouchObjects
 {
+  tTouchObjects();
   uint32_t     flags        = 0u;
   uint32_t     SurfaceAreas = 0u;
   uint32_t     TouchTimers  = 0u;
@@ -383,7 +384,7 @@ private:
   AdaGFXColorDepth _colorDepth = AdaGFXColorDepth::FullColor;
   int16_t _buttonGroup         = 0;
 
-  std::set<int16_t>_buttonGroups;
+  std::set<int16_t>_buttonGroups{};
 
   bool _settingsLoaded = false;
   bool _stillTouching  = false;
@@ -391,13 +392,13 @@ private:
 
   // Used to generate events on touch-release
   int8_t _lastObjectIndex = -1;
-  String _lastObjectName;
+  String _lastObjectName{};
   tTouch_Point _last_point;
   tTouch_Point _last_point_z; // Only used to store z in the x member
   # if TOUCH_FEATURE_EXTENDED_TOUCH && TOUCH_FEATURE_SWIPE
   Swipe_action_e _lastSwipe = Swipe_action_e::None;
-  int16_t _last_delta_x;
-  int16_t _last_delta_y;
+  int16_t _last_delta_x{};
+  int16_t _last_delta_y{};
   # endif // if TOUCH_FEATURE_EXTENDED_TOUCH && TOUCH_FEATURE_SWIPE
 
   struct tTouch_Globals
@@ -420,7 +421,7 @@ private:
     bool    logEnabled         = false;
   };
 
-  std::vector<tTouchObjects>TouchObjects;
+  std::vector<tTouchObjects>TouchObjects{};
 
 public:
 
@@ -429,7 +430,7 @@ public:
 
   tTouch_Globals Touch_Settings;
 
-  String settingsArray[TOUCH_ARRAY_SIZE];
+  String settingsArray[TOUCH_ARRAY_SIZE]{};
   uint8_t lastObjectIndex = 0u;
   uint8_t objectCount     = 0u;
 };

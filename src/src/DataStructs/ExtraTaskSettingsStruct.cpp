@@ -1,7 +1,5 @@
 #include "../DataStructs/ExtraTaskSettingsStruct.h"
 
-#include "../../ESPEasy_common.h"
-
 #include "../DataStructs/PluginStats_Config.h"
 
 #include "../Helpers/Misc.h"
@@ -11,15 +9,27 @@
 #define EXTRA_TASK_SETTINGS_VERSION 1
 
 
+ExtraTaskSettingsStruct::ExtraTaskSettingsStruct()
+{
+  memset(this, 0, sizeof(ExtraTaskSettingsStruct));
+  TaskIndex = INVALID_TASK_INDEX;
+  version = EXTRA_TASK_SETTINGS_VERSION;
+  for (int i = 0; i < VARS_PER_TASK; ++i) {
+    TaskDeviceValueDecimals[i] = 2;
+    TaskDeviceErrorValue[i] = NAN;
+  }
+}
+
 void ExtraTaskSettingsStruct::clear() {
   // Need to make sure every byte between the members is also zero
   // Otherwise the checksum will fail and settings will be saved too often.
   memset(this, 0, sizeof(ExtraTaskSettingsStruct));
   TaskIndex = INVALID_TASK_INDEX;
-  dummy1 = 0;
+  //dummy1 = 0;
   version = EXTRA_TASK_SETTINGS_VERSION;
   for (int i = 0; i < VARS_PER_TASK; ++i) {
     TaskDeviceValueDecimals[i] = 2;
+    TaskDeviceErrorValue[i] = NAN;
   }
 }
 
@@ -43,7 +53,7 @@ void ExtraTaskSettingsStruct::validate() {
       // Need to initialize the newly added fields
       for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
         setIgnoreRangeCheck(i);
-        TaskDeviceErrorValue[i] = 0.0f;
+        TaskDeviceErrorValue[i] = NAN;
         VariousBits[i]          = 0u;
       }
     }
@@ -74,7 +84,7 @@ void ExtraTaskSettingsStruct::clearUnusedValueNames(uint8_t usedVars) {
     ZERO_FILL(TaskDeviceValueNames[i]);
     TaskDeviceValueDecimals[i] = 2;
     setIgnoreRangeCheck(i);
-    TaskDeviceErrorValue[i] = 0.0f;
+    TaskDeviceErrorValue[i] = NAN;
     VariousBits[i]          = 0;
   }
 }
@@ -249,6 +259,48 @@ void ExtraTaskSettingsStruct::isDefaultTaskVarName(taskVarIndex_t taskVarIndex, 
     bitWrite(VariousBits[taskVarIndex], 1, isDefault);
   }
 }
+
+#if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+uint8_t ExtraTaskSettingsStruct::getTaskVarUnitOfMeasure(taskVarIndex_t taskVarIndex) const {
+  if (!validTaskVarIndex(taskVarIndex)) { return 0u; }
+  return get8BitFromUL(VariousBits[taskVarIndex], 8);
+}
+
+void ExtraTaskSettingsStruct::setTaskVarUnitOfMeasure(taskVarIndex_t taskVarIndex,
+                                                      uint8_t        unitOfMeasure) {
+  if (validTaskVarIndex(taskVarIndex)) {
+    set8BitToUL(VariousBits[taskVarIndex], 8, unitOfMeasure);
+  }
+}
+#endif // if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+
+#if FEATURE_CUSTOM_TASKVAR_VTYPE
+uint8_t ExtraTaskSettingsStruct::getTaskVarCustomVType(taskVarIndex_t taskVarIndex) const {
+  if (!validTaskVarIndex(taskVarIndex)) { return 0u; }
+  return get8BitFromUL(VariousBits[taskVarIndex], 16);
+}
+
+void ExtraTaskSettingsStruct::setTaskVarCustomVType(taskVarIndex_t taskVarIndex,
+                                                    uint8_t        customVType) {
+  if (validTaskVarIndex(taskVarIndex)) {
+    set8BitToUL(VariousBits[taskVarIndex], 16, customVType);
+  }
+}
+#endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+#if FEATURE_MQTT_STATE_CLASS
+uint8_t ExtraTaskSettingsStruct::getTaskVarStateClass(taskVarIndex_t taskVarIndex) const {
+  if (!validTaskVarIndex(taskVarIndex)) { return 0u; }
+  return get3BitFromUL(VariousBits[taskVarIndex], 24); // 3 Bits 24, 25, 26
+}
+
+void ExtraTaskSettingsStruct::setTaskVarStateClass(taskVarIndex_t taskVarIndex,
+                                                   uint8_t        stateClass) {
+  if (validTaskVarIndex(taskVarIndex)) {
+    set3BitToUL(VariousBits[taskVarIndex], 24, stateClass); // 3 Bits 24, 25, 26
+  }
+}
+#endif // if FEATURE_MQTT_STATE_CLASS
 
 
 void ExtraTaskSettingsStruct::populateDeviceValueNamesSeq(

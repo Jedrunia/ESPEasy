@@ -11,16 +11,18 @@
  */
 
 /** Changelog:
- * 2023-01-09, tonhuisman: Fixed a bug that the Inactivity threshold wasn't saved, and thus not applied
- * 2021-12-10, tonhuisman: Split functional parts into P120_data_struc to re-use for P125 ADXL345 SPI plugin
- * 2021-11-22, tonhuisman: Move from DEVELOPMENT to TESTING
- * 2021-11-02, tonhuisman: Add Axis offsets for calibration
- * 2021-11-01, tonhuisman: Add event processing (pseudo-interrupts), improve settings
- * 2021-10-31, tonhuisman: Add Single/Double-tap and Freefall detection
- * 2021-10-30, tonhuisman: Add required settings for sensor, read X/Y/Z values
- *                         Add get2BitFromUL/set2BitToUL/get3BitFromUL/set3BitToUL support functions
- * 2021-10-29, tonhuisman: Initial plugin created from template, using Sparkfun ADXL345 library
- *                         https://github.com/sparkfun/SparkFun_ADXL345_Arduino_Library
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported yet for Accelerometer)
+ * 2023-01-09 tonhuisman: Fixed a bug that the Inactivity threshold wasn't saved, and thus not applied
+ * 2021-12-10 tonhuisman: Split functional parts into P120_data_struc to re-use for P125 ADXL345 SPI plugin
+ * 2021-11-22 tonhuisman: Move from DEVELOPMENT to TESTING
+ * 2021-11-02 tonhuisman: Add Axis offsets for calibration
+ * 2021-11-01 tonhuisman: Add event processing (pseudo-interrupts), improve settings
+ * 2021-10-31 tonhuisman: Add Single/Double-tap and Freefall detection
+ * 2021-10-30 tonhuisman: Add required settings for sensor, read X/Y/Z values
+ *                        Add get2BitFromUL/set2BitToUL/get3BitFromUL/set3BitToUL support functions
+ * 2021-10-29 tonhuisman: Initial plugin created from template, using Sparkfun ADXL345 library
+ *                        https://github.com/sparkfun/SparkFun_ADXL345_Arduino_Library
  *
  *************************************************************************************************************************/
 
@@ -40,17 +42,18 @@ boolean Plugin_120(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number       = PLUGIN_ID_120;
-      Device[deviceCount].Type           = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType          = Sensor_VType::SENSOR_TYPE_TRIPLE;
-      Device[deviceCount].Ports          = 0;
-      Device[deviceCount].ValueCount     = 3;
-      Device[deviceCount].FormulaOption  = true;
-      Device[deviceCount].SendDataOption = true;
-      Device[deviceCount].TimerOption    = true;
-      Device[deviceCount].TimerOptional  = true;
-      Device[deviceCount].PluginStats    = true;
-      Device[deviceCount].OutputDataType = Output_Data_type_t::Simple;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_120;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_TRIPLE;
+      dev.ValueCount     = 3;
+      dev.FormulaOption  = true;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.PluginStats    = true;
+      dev.OutputDataType = Output_Data_type_t::Simple;
+      dev.CustomVTypeVar = true;
 
       break;
     }
@@ -80,6 +83,22 @@ boolean Plugin_120(uint8_t function, struct EventStruct *event, String& string)
       success           = true;
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_GET_DEVICEGPIONAMES: {
       serialHelper_getGpioNames(event);

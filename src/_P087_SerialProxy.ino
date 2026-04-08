@@ -11,6 +11,9 @@
 
 /**
  * Changelog:
+ * 2025-12-22 tonhuisman: Add support for receiving binary data, fixed length receive and sending events with hex data
+ *                        Moved most #define variables to P087_data_struct.h
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for Serial Proxy)
  * 2024-02-27 tonhuisman: Always process the regular expression like 'Global Match' to enable retrieving the available values
  * 2024-02-26 tonhuisman: Apply log-string and other code optimizations
  * 2024-02-25 tonhuisman: Add command serialproxy_test,<testdata> to test as if serial data was received
@@ -37,19 +40,6 @@
 # define PLUGIN_NAME_087         "Communication - Serial Proxy"
 
 
-# define P087_BAUDRATE           PCONFIG_LONG(0)
-# define P087_BAUDRATE_LABEL     PCONFIG_LABEL(0)
-# define P087_SERIAL_CONFIG      PCONFIG_LONG(1)
-
-# define P087_QUERY_VALUE        0 // Temp placement holder until we know what selectors are needed.
-# define P087_NR_OUTPUT_OPTIONS  1
-
-# define P087_NR_OUTPUT_VALUES   1
-# define P087_QUERY1_CONFIG_POS  3
-
-# define P087_DEFAULT_BAUDRATE   38400
-
-
 // Plugin settings:
 // Validate:
 // - [0..9]
@@ -73,20 +63,16 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_087;
-      Device[deviceCount].Type               = DEVICE_TYPE_SERIAL;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_STRING;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = false;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_087;
+      dev.Type           = DEVICE_TYPE_SERIAL;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_STRING;
+      dev.ValueCount     = 1;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
 
       // FIXME TD-er: Not sure if access to any existing task data is needed when saving
-      Device[deviceCount].ExitTaskBeforeSave = false;
+      dev.ExitTaskBeforeSave = false;
       break;
     }
 
@@ -107,6 +93,15 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
       }
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_GET_DEVICEGPIONAMES: {
       serialHelper_getGpioNames(event, false, true); // TX optional
@@ -162,6 +157,14 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
       addFormSubHeader(F("Statistics"));
       P087_html_show_stats(event);
 
+      # ifndef LIMIT_BUILD_SIZE
+      addFormSubHeader(F("Data options"));
+      addFormCheckBox(F("Receive binary data"), P087_READ_BIN_LABEL, P087_CONFIG_GET_READ_BIN);
+      addFormNumericBox(F("Fixed length input data"), P087_FIXED_LENGTH_LABEL, P087_CONFIG_GET_FIXED_LENGTH, 0, 255);
+      addUnit(F("0 = off, max. 255"));
+      addFormCheckBox(F("Event with hex. data (no prefix)"), P087_EVENT_HEX_LABEL, P087_CONFIG_GET_EVENT_HEX);
+      # endif // ifndef LIMIT_BUILD_SIZE
+
       success = true;
       break;
     }
@@ -169,6 +172,11 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
     case PLUGIN_WEBFORM_SAVE: {
       P087_BAUDRATE      = getFormItemInt(P087_BAUDRATE_LABEL);
       P087_SERIAL_CONFIG = serialHelper_serialconfig_webformSave();
+      # ifndef LIMIT_BUILD_SIZE
+      P087_CONFIG_SET_READ_BIN(isFormItemChecked(P087_READ_BIN_LABEL));
+      P087_CONFIG_SET_FIXED_LENGTH(getFormItemInt(P087_FIXED_LENGTH_LABEL));
+      P087_CONFIG_SET_EVENT_HEX(isFormItemChecked(P087_EVENT_HEX_LABEL));
+      # endif // ifndef LIMIT_BUILD_SIZE
 
       P087_data_struct *P087_data =
         static_cast<P087_data_struct *>(getPluginTaskData(event->TaskIndex));
@@ -201,6 +209,15 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
       if (P087_data->init(port, serial_rx, serial_tx, P087_BAUDRATE, static_cast<uint8_t>(P087_SERIAL_CONFIG))) {
         LoadCustomTaskSettings(event->TaskIndex, P087_data->_lines, P87_Nlines, 0);
         P087_data->post_init();
+        # ifndef LIMIT_BUILD_SIZE
+        P087_data->setHandleBinary(P087_CONFIG_GET_READ_BIN);
+        P087_data->setEventAsHex(P087_CONFIG_GET_EVENT_HEX);
+
+        if (P087_CONFIG_GET_FIXED_LENGTH > 0) {
+          P087_data->setMaxLength(P087_CONFIG_GET_FIXED_LENGTH);
+        }
+        P087_data->setFixedLength(P087_CONFIG_GET_FIXED_LENGTH);
+        # endif // ifndef LIMIT_BUILD_SIZE
         success = true;
         serialHelper_log_GpioDescription(port, serial_rx, serial_tx);
       } else {
@@ -210,17 +227,15 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
     }
 
     case PLUGIN_FIFTY_PER_SECOND: {
-      if (Settings.TaskDeviceEnabled[event->TaskIndex]) {
-        P087_data_struct *P087_data =
-          static_cast<P087_data_struct *>(getPluginTaskData(event->TaskIndex));
+      P087_data_struct *P087_data =
+        static_cast<P087_data_struct *>(getPluginTaskData(event->TaskIndex));
 
-        if ((nullptr != P087_data) && P087_data->loop()) {
-          Scheduler.schedule_task_device_timer(event->TaskIndex, millis() + 10);
-          delay(0); // Processing a full sentence may take a while, run some
-                    // background tasks.
-        }
-        success = true;
+      if ((nullptr != P087_data) && P087_data->loop()) {
+        Scheduler.schedule_task_device_timer(event->TaskIndex, millis() + 10);
+        delay(0); // Processing a full sentence may take a while, run some
+                  // background tasks.
       }
+      success = true;
       break;
     }
 
@@ -231,6 +246,12 @@ boolean Plugin_087(uint8_t function, struct EventStruct *event, String& string) 
       if ((nullptr != P087_data) && P087_data->getSentence(event->String2)) {
         if (Plugin_087_match_all(event->TaskIndex, event->String2)) {
           //          sendData(event);
+          # ifndef LIMIT_BUILD_SIZE
+
+          if (P087_data->isEventAsHex() && !event->String2.isEmpty()) { // Convert to hex without prefix
+            event->String2 = formatToHex_array(reinterpret_cast<const uint8_t *>(&event->String2[0]), event->String2.length());
+          }
+          # endif // ifndef LIMIT_BUILD_SIZE
           # ifndef BUILD_NO_DEBUG
           addLog(LOG_LEVEL_DEBUG, event->String2);
           # endif // ifndef BUILD_NO_DEBUG
@@ -352,13 +373,14 @@ void P087_html_show_matchForms(struct EventStruct *event) {
         optionValues[i] = matchType;
       }
       P087_Match_Type choice = P087_data->getMatchType();
-      addFormSelector(F("Match Type"),
-                      getPluginCustomArgName(P087_MATCH_TYPE_POS),
-                      P087_Match_Type_NR_ELEMENTS,
-                      options,
-                      optionValues,
-                      choice,
-                      false);
+      const FormSelectorOptions selector(
+        P087_Match_Type_NR_ELEMENTS,
+        options,
+        optionValues);
+      selector.addFormSelector(
+        F("Match Type"),
+        getPluginCustomArgName(P087_MATCH_TYPE_POS),
+        choice);
       addFormNote(F("Capture filter can only be used on Global Match"));
     }
 
@@ -389,14 +411,16 @@ void P087_html_show_matchForms(struct EventStruct *event) {
           const __FlashStringHelper *options[2];
           options[P087_Filter_Comp::Equal]    = F("==");
           options[P087_Filter_Comp::NotEqual] = F("!=");
-          const int optionValues[2] = { P087_Filter_Comp::Equal, P087_Filter_Comp::NotEqual };
-          addSelector(id, 2, options, optionValues, nullptr, static_cast<int>(comparator), false, true, F(""));
+          const int optionValues[] = { P087_Filter_Comp::Equal, P087_Filter_Comp::NotEqual };
+          FormSelectorOptions selector(2, options, optionValues);
+          selector.clearClassName();
+          selector.addSelector(id, static_cast<int>(comparator));
           break;
         }
         case 2:
         {
           // Compare with
-          addTextBox(id, filter, 32, false, false, EMPTY_STRING, F(""));
+          addTextBox(id, filter, 32, F(""));
           break;
         }
       }

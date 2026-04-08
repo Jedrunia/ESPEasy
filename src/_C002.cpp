@@ -8,6 +8,7 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-08-23 tonhuisman: Add 10/sec call to poll background connection process while not connected
  * 2024-03-24 tonhuisman: Add support for 'Invert On/Off value' in P029 - Domoticz MQTT Helper
  * 2024-03-24 tonhuisman: Start Changelog (newest on top)
  */
@@ -42,6 +43,9 @@ bool CPlugin_002(CPlugin::Function function, struct EventStruct *event, String& 
       proto.usesExtCreds = true;
       proto.defaultPort  = 1883;
       proto.usesID       = true;
+      #if FEATURE_MQTT_TLS 
+      proto.usesTLS = true;
+      # endif // if FEATURE_MQTT_TLS
       break;
     }
 
@@ -107,7 +111,7 @@ bool CPlugin_002(CPlugin::Function function, struct EventStruct *event, String& 
               switch (Settings.getPluginID_for_task(x).value) {
                 case 1: // temp solution, if input switch, update state
                 {
-                  action = strformat(F("gpio,%d,%d"), x, static_cast<int>(nvalue));
+                  action = strformat(F("gpio,%d,%d"), Settings.TaskDevicePin1[x], static_cast<int>(nvalue));
                   break;
                 }
                 case 29: // temp solution, if plugin 029, set gpio
@@ -152,21 +156,18 @@ bool CPlugin_002(CPlugin::Function function, struct EventStruct *event, String& 
                   }
                   break;
                 }
-# if defined(USES_P088)                                       // || defined(USES_P115)
+                # if defined(USES_P088)
                 case 88:                                      // Send heatpump IR (P088) if IDX matches
-                  //                case 115:            // Send heatpump IR (P115) if IDX matches
                 {
                   action = concat(F("heatpumpir,"), svalue1); // svalue1 is like 'gree,1,1,0,22,0,0'
                   break;
                 }
-# endif // USES_P088 || USES_P115
+                # endif // if defined(USES_P088)
                 default:
                   break;
               }
 
-              const bool validCommand = action.length() > 0;
-
-              if (validCommand) {
+              if (action.length() != 0) {
                 mustSendEvent = true;
 
                 // Try plugin and internal
@@ -204,19 +205,25 @@ bool CPlugin_002(CPlugin::Function function, struct EventStruct *event, String& 
       if (event->idx != 0)
       {
         String json = serializeDomoticzJson(event);
-# ifndef BUILD_NO_DEBUG
+        # ifndef BUILD_NO_DEBUG
 
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           addLogMove(LOG_LEVEL_DEBUG, concat(F("MQTT : "), json));
         }
-# endif // ifndef BUILD_NO_DEBUG
+        # endif // ifndef BUILD_NO_DEBUG
 
         String pubname = CPlugin_002_pubname;
         parseControllerVariables(pubname, event, false);
 
+        const bool taskRetained = Settings.SendRetainedTaskValues(event->TaskIndex, event->ControllerIndex);
+
         // Publish using move operator, thus pubname and json are empty after this call
-        success = MQTTpublish(event->ControllerIndex, event->TaskIndex, std::move(pubname), std::move(json), CPlugin_002_mqtt_retainFlag);
-      } // if ixd !=0
+        success = MQTTpublish(event->ControllerIndex,
+                              event->TaskIndex,
+                              std::move(pubname),
+                              std::move(json),
+                              CPlugin_002_mqtt_retainFlag || taskRetained);
+      } // if idx !=0
       else
       {
         addLog(LOG_LEVEL_ERROR, F("MQTT : IDX cannot be zero!"));
@@ -230,6 +237,14 @@ bool CPlugin_002(CPlugin::Function function, struct EventStruct *event, String& 
       delay(0);
       break;
     }
+
+    # if FEATURE_MQTT_CONNECT_BACKGROUND
+    case CPlugin::Function::CPLUGIN_TEN_PER_SECOND:
+    {
+      MQTTConnectInBackground(CONTROLLER_MAX, true); // Report state
+      break;
+    }
+    # endif // if FEATURE_MQTT_CONNECT_BACKGROUND
 
     default:
       break;

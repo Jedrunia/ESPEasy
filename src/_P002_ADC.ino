@@ -1,6 +1,6 @@
 #include "_Plugin_Helper.h"
 #ifdef USES_P002
-
+#if SOC_ADC_SUPPORTED || defined(ESP8266)
 
 # include "src/Helpers/Hardware.h"
 # include "src/PluginStructs/P002_data_struct.h"
@@ -8,6 +8,10 @@
 // #######################################################################################################
 // #################################### Plugin 002: Analog ###############################################
 // #######################################################################################################
+
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ */
 
 # define PLUGIN_002
 # define PLUGIN_ID_002         2
@@ -23,19 +27,16 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_002;
-      Device[deviceCount].Type               = DEVICE_TYPE_ANALOG;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
-      Device[deviceCount].TaskLogsOwnPeaks   = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number           = PLUGIN_ID_002;
+      dev.Type             = DEVICE_TYPE_ANALOG;
+      dev.VType            = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption    = true;
+      dev.ValueCount       = 1;
+      dev.SendDataOption   = true;
+      dev.TimerOption      = true;
+      dev.PluginStats      = true;
+      dev.TaskLogsOwnPeaks = true;
       break;
     }
 
@@ -51,6 +52,14 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      success = getDiscoveryVType(event, Plugin_QueryVType_Analog, 255, event->Par5);
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
+
     case PLUGIN_WEBFORM_LOAD:
     {
       P002_data_struct *P002_data =
@@ -60,7 +69,14 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
         P002_data->webformLoad(event);
         success = true;
       } else {
-        P002_data = new (std::nothrow) P002_data_struct();
+        constexpr unsigned size = sizeof(P002_data_struct);
+        void *ptr               = special_calloc(1, size);
+  
+        if (ptr == nullptr) {
+          break;
+        }
+
+        P002_data = new (ptr) P002_data_struct();
 
         if (nullptr != P002_data) {
           P002_data->init(event);
@@ -95,7 +111,7 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
     {
-      initPluginTaskData(event->TaskIndex, new (std::nothrow) P002_data_struct());
+      special_initPluginTaskData(event->TaskIndex, P002_data_struct);
       P002_data_struct *P002_data =
         static_cast<P002_data_struct *>(getPluginTaskData(event->TaskIndex));
 
@@ -133,7 +149,7 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
 
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {
           String log = strformat(
-            F("ADC  : Analog value: %d = %s"), 
+            F("ADC  : Analog value: %d = %s"),
             raw_value,
             formatUserVarNoCheck(event, 0).c_str());
 
@@ -170,4 +186,5 @@ boolean Plugin_002(uint8_t function, struct EventStruct *event, String& string)
   return success;
 }
 
+#endif
 #endif // USES_P002

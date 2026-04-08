@@ -5,6 +5,10 @@
 // #################################### Plugin-017: PN532 RFID reader ####################################
 // #######################################################################################################
 
+/** Changelog:
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for RFID)
+ */
 
 /*
  ################## WARNING!!!!! ################
@@ -84,17 +88,14 @@ boolean Plugin_017(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_017;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_ULONG;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = false;
-      Device[deviceCount].TimerOptional      = true;
-      Device[deviceCount].GlobalSyncOption   = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_017;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_ULONG;
+      dev.ValueCount     = 1;
+      dev.SendDataOption = true;
+      dev.TimerOptional  = true;
+      dev.CustomVTypeVar = true;
       break;
     }
 
@@ -109,6 +110,22 @@ boolean Plugin_017(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_017));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_I2C_HAS_ADDRESS:
     {
@@ -147,17 +164,11 @@ boolean Plugin_017(uint8_t function, struct EventStruct *event, String& string)
 
       // 0.25 to 60 seconds
       addFormNumericBox(F("Automatic Tag removal after"), F("removetime"), P017_REMOVAL_TIMEOUT, 250, 60000);
-      addUnit(F("mSec."));
-
+      addUnit(F("ms"));
 
       addFormNumericBox(F("Value to set on Tag removal"), F("removevalue"), P017_NO_TAG_DETECTED_VALUE, 0, 2147483647);
 
-      // Max allowed is int
-      // =
-      // 0x7FFFFFFF ...
-
-      const bool eventOnRemoval = P017_EVENT_ON_TAG_REMOVAL == 1; // Normal state!
-      addFormCheckBox(F("Event on Tag removal"), F("eventremove"), eventOnRemoval);
+      addFormCheckBox(F("Event on Tag removal"), F("eventremove"), P017_EVENT_ON_TAG_REMOVAL == 1);
 
       success = true;
       break;
@@ -252,8 +263,14 @@ bool P017_handle_timer_in(struct EventStruct *event)
         # endif // ifdef P017_DEBUG_LOGIC_ANALYZER_PIN
 
       // TODO: Clock stretching issue https://github.com/esp8266/Arduino/issues/1541
-      if (Settings.isI2CEnabled()
-          && ((DIRECT_pinRead(Settings.Pin_i2c_sda) == 0) || (DIRECT_pinRead(Settings.Pin_i2c_scl) == 0)))
+      # if FEATURE_I2C_MULTIPLE
+      const uint8_t i2cBus = Settings.getI2CInterface(event->TaskIndex);
+      # else // if FEATURE_I2C_MULTIPLE
+      const uint8_t i2cBus = 0;
+      # endif // if FEATURE_I2C_MULTIPLE
+
+      if (Settings.isI2CEnabled(i2cBus)
+          && ((DIRECT_pinRead(Settings.getI2CSdaPin(i2cBus)) == 0) || (DIRECT_pinRead(Settings.getI2CSclPin(i2cBus)) == 0)))
       {
         addLog(LOG_LEVEL_ERROR, F("PN532: BUS error"));
         Plugin_017_Init(CONFIG_PIN3);
@@ -337,20 +354,14 @@ bool P017_handle_timer_in(struct EventStruct *event)
         }
 
         tempcounter++;
-
+#ifndef BUILD_NO_DEBUG
         if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-          String log = F("PN532: ");
-
-          if (new_key) {
-            log += F("New Tag: ");
-          } else {
-            log += F("Old Tag: ");
-          }
-          log += key;
-          log += ' ';
-          log += tempcounter;
-          addLogMove(LOG_LEVEL_INFO, log);
+          addLog(LOG_LEVEL_INFO, strformat(F("PN532: %s Tag: %d %u"),
+                                           FsP(new_key ? F("New") : F("Old")),
+                                           key,
+                                           tempcounter));
         }
+#endif
 
         if (new_key) { sendData(event); }
         uint32_t resetTimer = P017_REMOVAL_TIMEOUT;
@@ -403,6 +414,7 @@ boolean Plugin_017_Init(int8_t resetPin)
   uint32_t versiondata = getFirmwareVersion();
 
   if (versiondata) {
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       addLog(LOG_LEVEL_INFO,
              strformat(F("PN532: Found chip PN5%s FW: %s.%s"),
@@ -410,6 +422,7 @@ boolean Plugin_017_Init(int8_t resetPin)
                        formatToHex_no_prefix((versiondata >> 16) & 0xFF, 2).c_str(),
                        formatToHex_no_prefix((versiondata >> 8) & 0xFF,  2).c_str()));
     }
+#endif
   }
   else {
 # ifdef P017_DEBUG_LOGIC_ANALYZER_PIN_INIT

@@ -46,7 +46,9 @@ const char Internal_commands_c[] PROGMEM =
 #define Int_cmd_d_offset ESPEasy_cmd_e::datetime
 const char Internal_commands_d[] PROGMEM =
   "datetime|"
+#ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
   "debug|"
+#endif
   "dec|"
   "deepsleep|"
   "delay|"
@@ -57,18 +59,18 @@ const char Internal_commands_d[] PROGMEM =
   "dst|"
 ;
 
+#if FEATURE_WIFI
 #define Int_cmd_e_offset ESPEasy_cmd_e::erasesdkwifi
+#else
+#define Int_cmd_e_offset ESPEasy_cmd_e::event
+#endif
 const char Internal_commands_e[] PROGMEM =
+#if FEATURE_WIFI
   "erasesdkwifi|"
+#endif
   "event|"
   "executerules|"
 #if FEATURE_ETHERNET
-  "ethphyadr|"
-  "ethpinmdc|"
-  "ethpinmdio|"
-  "ethpinpower|"
-  "ethphytype|"
-  "ethclockmode|"
   "ethip|"
   "ethgateway|"
   "ethsubnet|"
@@ -78,13 +80,18 @@ const char Internal_commands_e[] PROGMEM =
 #endif // FEATURE_ETHERNET
 ;
 
-#define Int_cmd_ghij_offset ESPEasy_cmd_e::gateway
-const char Internal_commands_ghij[] PROGMEM =
+#define Int_cmd_fghij_offset ESPEasy_cmd_e::factoryreset
+const char Internal_commands_fghij[] PROGMEM =
+  "factoryreset|"
   "gateway|"
   "gpio|"
   "gpiotoggle|"
+#if FEATURE_WIFI
   "hiddenssid|"
+#endif
+#if FEATURE_I2C
   "i2cscanner|"
+#endif
   "inc|"
   "ip|"
 #if FEATURE_USE_IPV6
@@ -95,13 +102,28 @@ const char Internal_commands_ghij[] PROGMEM =
 #endif // ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
 ;
 
+#if FEATURE_LAT_LONG_VAR_CMD
+#define Int_cmd_l_offset ESPEasy_cmd_e::latitude
+#else // if FEATURE_LAT_LONG_VAR_CMD
 #define Int_cmd_l_offset ESPEasy_cmd_e::let
+#endif // if FEATURE_LAT_LONG_VAR_CMD
 const char Internal_commands_l[] PROGMEM =
+  #if FEATURE_LAT_LONG_VAR_CMD
+  "latitude|"
+  #endif // if FEATURE_LAT_LONG_VAR_CMD
   "let|"
+  #if FEATURE_STRING_VARIABLES
+  "letstr|"
+  #endif
   "load|"
   "logentry|"
+  #if FEATURE_LAT_LONG_VAR_CMD
+  "longitude|"
+  #endif // if FEATURE_LAT_LONG_VAR_CMD
   "looptimerset|"
   "looptimerset_ms|"
+  "looptimersetandrun|"
+  "looptimersetandrun_ms|"
   "longpulse|"
   "longpulse_ms|"
 #ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
@@ -135,6 +157,12 @@ const char Internal_commands_m[] PROGMEM =
 #define Int_cmd_no_offset ESPEasy_cmd_e::name
 const char Internal_commands_no[] PROGMEM =
   "name|"
+  "networkdisable|"
+  "networkenable|"
+#if FEATURE_STORE_NETWORK_INTERFACE_SETTINGS
+  "networkexportconfig|"
+  "networkimportconfig|"
+#endif
   "nosleep|"
 #if FEATURE_NOTIFIER
   "notify|"
@@ -161,19 +189,12 @@ const char Internal_commands_p[] PROGMEM =
 #endif // #ifdef USES_P019
 #if FEATURE_POST_TO_HTTP
   "posttohttp|"
+#if FEATURE_HTTP_TLS
+  "posttohttps|"
+#endif // if FEATURE_HTTP_TLS
 #endif // #if FEATURE_POST_TO_HTTP
 #if FEATURE_CUSTOM_PROVISIONING
   "provision|"
- # ifdef PLUGIN_BUILD_MAX_ESP32 // FIXME DEPRECATED: Fallback for temporary backward compatibility
-  "provisionconfig|"
-  "provisionsecurity|"
-  #  if FEATURE_NOTIFIER
-  "provisionnotification|"
-  #  endif // #if FEATURE_NOTIFIER
-  "provisionprovision|"
-  "provisionrules|"
-  "provisionfirmware|"
- # endif // #ifdef PLUGIN_BUILD_MAX_ESP32
 #endif   // #if FEATURE_CUSTOM_PROVISIONING
   "pulse|"
 #if FEATURE_MQTT
@@ -182,6 +203,9 @@ const char Internal_commands_p[] PROGMEM =
 #endif // #if FEATURE_MQTT
 #if FEATURE_PUT_TO_HTTP
   "puttohttp|"
+#if FEATURE_HTTP_TLS
+  "puttohttps|"
+#endif // if FEATURE_HTTP_TLS
 #endif // #if FEATURE_PUT_TO_HTTP
   "pwm|"
 ;
@@ -189,7 +213,6 @@ const char Internal_commands_p[] PROGMEM =
 #define Int_cmd_r_offset ESPEasy_cmd_e::reboot
 const char Internal_commands_r[] PROGMEM =
   "reboot|"
-  "reset|"
   "resetflashwritecounter|"
   "restart|"
   "rtttl|"
@@ -209,8 +232,12 @@ const char Internal_commands_s[] PROGMEM =
 #endif // #if FEATURE_ESPEASY_P2P
 #if FEATURE_SEND_TO_HTTP
   "sendtohttp|"
+#if FEATURE_HTTP_TLS
+  "sendtohttps|"
+#endif // if FEATURE_HTTP_TLS
 #endif // FEATURE_SEND_TO_HTTP
   "sendtoudp|"
+  "sendtoudpmix|"
 #ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
   "serialfloat|"
 #endif // ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
@@ -237,6 +264,10 @@ const char Internal_commands_t[] PROGMEM =
   "taskrun|"
   "taskrunat|"
   "taskvalueset|"
+  #if FEATURE_STRING_VARIABLES
+  "taskvaluesetderived|"
+  "taskvaluesetpresentation|"
+  #endif // if FEATURE_STRING_VARIABLES
   "taskvaluetoggle|"
   "taskvaluesetandrun|"
   "timerpause|"
@@ -259,8 +290,14 @@ const char Internal_commands_u[] PROGMEM =
   "usentp|"
 ;
 
+#if FEATURE_WIFI || !defined(LIMIT_BUILD_SIZE)
+#if FEATURE_WIFI
 #define Int_cmd_w_offset ESPEasy_cmd_e::wifiallowap
+#else
+#define Int_cmd_w_offset ESPEasy_cmd_e::wdconfig
+#endif
 const char Internal_commands_w[] PROGMEM =
+#if FEATURE_WIFI
   "wifiallowap|"
   "wifiapmode|"
   "wificonnect|"
@@ -268,15 +305,20 @@ const char Internal_commands_w[] PROGMEM =
   "wifikey|"
   "wifikey2|"
   "wifimode|"
+#if FEATURE_OTA_FW_UPDATE_ESP_HOSTED_MCU
+  "wifiotahostedmcu|"
+#endif
   "wifiscan|"
   "wifissid|"
   "wifissid2|"
   "wifistamode|"
+#endif
 #ifndef LIMIT_BUILD_SIZE
   "wdconfig|"
   "wdread|"
 #endif // ifndef LIMIT_BUILD_SIZE
 ;
+#endif
 
 const char* getInternalCommand_Haystack_Offset(const char firstLetter, int& offset)
 {
@@ -304,12 +346,13 @@ const char* getInternalCommand_Haystack_Offset(const char firstLetter, int& offs
       offset   = static_cast<int>(Int_cmd_e_offset);
       haystack = Internal_commands_e;
       break;
+    case 'f':
     case 'g':
     case 'h':
     case 'i':
     case 'j':
-      offset   = static_cast<int>(Int_cmd_ghij_offset);
-      haystack = Internal_commands_ghij;
+      offset   = static_cast<int>(Int_cmd_fghij_offset);
+      haystack = Internal_commands_fghij;
       break;
     case 'l':
       offset   = static_cast<int>(Int_cmd_l_offset);
@@ -344,10 +387,12 @@ const char* getInternalCommand_Haystack_Offset(const char firstLetter, int& offs
       offset   = static_cast<int>(Int_cmd_u_offset);
       haystack = Internal_commands_u;
       break;
+#if FEATURE_WIFI || !defined(LIMIT_BUILD_SIZE)
     case 'w':
       offset   = static_cast<int>(Int_cmd_w_offset);
       haystack = Internal_commands_w;
       break;
+#endif
 
     default:
       return nullptr;

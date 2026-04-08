@@ -5,10 +5,17 @@
 // #################################### Plugin 033: Dummy ################################################
 // #######################################################################################################
 
+/** Changelog:
+ * 2025-09-11 tonhuisman: Enable Formula field
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported yet for Dummy Device)
+ */
+
 # define PLUGIN_033
 # define PLUGIN_ID_033         33
 # define PLUGIN_NAME_033       "Generic - Dummy Device"
 # define PLUGIN_VALUENAME1_033 "Dummy"
+
 boolean Plugin_033(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
@@ -17,21 +24,20 @@ boolean Plugin_033(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_033;
-      Device[deviceCount].Type               = DEVICE_TYPE_DUMMY;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].DecimalsOnly       = true;
-      Device[deviceCount].ValueCount         = 4;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].OutputDataType     = Output_Data_type_t::All;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_033;
+      dev.Type           = DEVICE_TYPE_DUMMY;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 4;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.OutputDataType = Output_Data_type_t::All;
+      dev.PluginStats    = true;
+      dev.CustomVTypeVar = true;
+      dev.MqttStateClass = true;
+      dev.NoDeviceSettings = true;
       break;
     }
 
@@ -69,6 +75,22 @@ boolean Plugin_033(uint8_t function, struct EventStruct *event, String& string)
       success           = true;
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_INIT:
     {

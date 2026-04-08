@@ -8,6 +8,9 @@
 // Plugin to read 12-bit-values from ADC chip MCP3221. It is used e.g. in MinipH pH interface to sample a pH probe in an aquarium
 // written by Jochen Krapf (jk@nerd2nerd.org)
 
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ */
 
 # include "src/PluginStructs/P060_data_struct.h"
 
@@ -25,18 +28,15 @@ boolean Plugin_060(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_060;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_060;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 1;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -51,6 +51,14 @@ boolean Plugin_060(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_060));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      success = getDiscoveryVType(event, Plugin_QueryVType_Analog, 255, event->Par5);
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -126,7 +134,6 @@ boolean Plugin_060(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
-
     case PLUGIN_TEN_PER_SECOND:
     {
       if (PCONFIG(1)) // Oversampling?
@@ -154,10 +161,10 @@ boolean Plugin_060(uint8_t function, struct EventStruct *event, String& string)
 
         if (PCONFIG(3)) // Calibration?
         {
-          int   adc1 = PCONFIG_LONG(0);
-          int   adc2 = PCONFIG_LONG(1);
-          float out1 = PCONFIG_FLOAT(0);
-          float out2 = PCONFIG_FLOAT(1);
+          const int   adc1 = PCONFIG_LONG(0);
+          const int   adc2 = PCONFIG_LONG(1);
+          const float out1 = PCONFIG_FLOAT(0);
+          const float out2 = PCONFIG_FLOAT(1);
 
           if (adc1 != adc2)
           {

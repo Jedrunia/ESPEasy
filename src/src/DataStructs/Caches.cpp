@@ -3,7 +3,8 @@
 #include "../Globals/Device.h"
 #include "../Globals/ExtraTaskSettings.h"
 #include "../Globals/Settings.h"
-#include "../Globals/WiFi_AP_Candidates.h"
+
+#include "../../ESPEasy/net/Globals/WiFi_AP_Candidates.h"
 
 #include "../Helpers/ESPEasy_Storage.h"
 #include "../Helpers/StringConverter.h"
@@ -20,7 +21,7 @@ void Caches::clearAllCaches()
 
 void Caches::clearAllButTaskCaches() {
   clearFileCaches();
-  WiFi_AP_Candidates.clearCache();
+  ESPEasy::net::wifi::WiFi_AP_Candidates.clearCache();
   rulesHelper.closeAllFiles();
 }
 
@@ -294,6 +295,50 @@ PluginStats_Config_t Caches::getPluginStatsConfig(taskIndex_t TaskIndex, taskVar
 
 #endif // if FEATURE_PLUGIN_STATS
 
+#if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+uint8_t Caches::getTaskVarUnitOfMeasure(taskIndex_t    TaskIndex,
+                                        taskVarIndex_t taskVarIndex) {
+  if (validTaskIndex(TaskIndex) && (validTaskVarIndex(taskVarIndex))) {
+    auto it = getExtraTaskSettings(TaskIndex);
+
+    if (it != extraTaskSettings_cache.end()) {
+      return it->second.unitOfMeasure[taskVarIndex];
+    }
+  }
+  return 0;
+}
+
+#endif // if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+
+#if FEATURE_CUSTOM_TASKVAR_VTYPE
+uint8_t Caches::getTaskVarCustomVType(taskIndex_t    TaskIndex,
+                                      taskVarIndex_t taskVarIndex) {
+  if (validTaskIndex(TaskIndex) && (validTaskVarIndex(taskVarIndex))) {
+    auto it = getExtraTaskSettings(TaskIndex);
+
+    if (it != extraTaskSettings_cache.end()) {
+      return it->second.customVType[taskVarIndex];
+    }
+  }
+  return 0;
+}
+
+#endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+#if FEATURE_MQTT_STATE_CLASS
+uint8_t Caches::getTaskVarStateClass(taskIndex_t    TaskIndex,
+                                     taskVarIndex_t taskVarIndex) {
+  if (validTaskIndex(TaskIndex) && (validTaskVarIndex(taskVarIndex))) {
+    auto it = getExtraTaskSettings(TaskIndex);
+
+    if (it != extraTaskSettings_cache.end()) {
+      return it->second.mqttStateClass[taskVarIndex];
+    }
+  }
+  return 0;
+}
+
+#endif // if FEATURE_MQTT_STATE_CLASS
 
 void Caches::updateExtraTaskSettingsCache()
 {
@@ -316,9 +361,9 @@ void Caches::updateExtraTaskSettingsCache()
     move_special(tmp.TaskDeviceName, String(ExtraTaskSettings.TaskDeviceName));
 
     for (size_t i = 0; i < VARS_PER_TASK; ++i) {
-        #ifdef ESP32
-        move_special(tmp.TaskDeviceValueNames[i], String(ExtraTaskSettings.TaskDeviceValueNames[i]));
-        #endif // ifdef ESP32
+      #ifdef ESP32
+      move_special(tmp.TaskDeviceValueNames[i], String(ExtraTaskSettings.TaskDeviceValueNames[i]));
+      #endif // ifdef ESP32
 
       if (ExtraTaskSettings.TaskDeviceFormula[i][0] != 0) {
         bitSet(tmp.hasFormula, 2 * i);
@@ -338,6 +383,16 @@ void Caches::updateExtraTaskSettingsCache()
 
       tmp.pluginStatsConfig[i] = ExtraTaskSettings.getPluginStatsConfig(i);
       #endif // if FEATURE_PLUGIN_STATS
+
+      #if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+      tmp.unitOfMeasure[i] = ExtraTaskSettings.getTaskVarUnitOfMeasure(i);
+      #endif // if FEATURE_TASKVALUE_UNIT_OF_MEASURE
+      #if FEATURE_CUSTOM_TASKVAR_VTYPE
+      tmp.customVType[i] = ExtraTaskSettings.getTaskVarCustomVType(i);
+      #endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      #if FEATURE_MQTT_STATE_CLASS
+      tmp.mqttStateClass[i] = ExtraTaskSettings.getTaskVarStateClass(i);
+      #endif // if FEATURE_MQTT_STATE_CLASS
     }
     #ifdef ESP32
     tmp.TaskDevicePluginConfigLong_index_used = 0;

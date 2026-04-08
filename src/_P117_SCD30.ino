@@ -9,13 +9,14 @@
 // this plugin is based on the Frogmore42 library
 // written based code from https://github.com/Frogmore42/Sonoff-Tasmota/tree/development/lib/FrogmoreScd30
 
-// Changelog:
-//
-// 2023-11-24 tonhuisman: Add Device flag for I2CMax100kHz as this sensor won't work at 400 kHz
-// 2022-02-26 tonhuisman: Implement commands for get/set measurement interval, and a setting too. Bugfix.
-// 2022-02-26 tonhuisman: Implement commands for auto/manual CO2 calibration, and setting for auto calibration
-// 2021-11-20 tonhuisman: Implement multi-instance support (using PluginStruct)
-// 2021-09 tonhuisman: Moved from ESPEasyPluginPlayground to main repository
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ * 2023-11-24 tonhuisman: Add Device flag for I2CMax100kHz as this sensor won't work at 400 kHz
+ * 2022-02-26 tonhuisman: Implement commands for get/set measurement interval, and a setting too. Bugfix.
+ * 2022-02-26 tonhuisman: Implement commands for auto/manual CO2 calibration, and setting for auto calibration
+ * 2021-11-20 tonhuisman: Implement multi-instance support (using PluginStruct)
+ * 2021-09 tonhuisman: Moved from ESPEasyPluginPlayground to main repository
+ */
 
 // Commands:
 //   SCDGETABC                 - shows automatic calibration period in days, 0 = disable
@@ -45,19 +46,16 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_117;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_QUAD;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 4;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
-      Device[deviceCount].I2CMax100kHz       = true; // Max 100 kHz allowed/supported
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_117;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_QUAD;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 4;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
+      dev.I2CMax100kHz   = true; // Max 100 kHz allowed/supported
       break;
     }
 
@@ -75,6 +73,18 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[3], PSTR(PLUGIN_VALUENAME4_117));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_CO2_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_HUM_ONLY);
+      event->Par3 = static_cast<int>(Sensor_VType::SENSOR_TYPE_TEMP_ONLY);
+      event->Par4 = static_cast<int>(Sensor_VType::SENSOR_TYPE_CO2_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     {
@@ -131,23 +141,15 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
       P117_SENSOR_ALTITUDE    = alt;
       P117_TEMPERATURE_OFFSET = getFormItemFloat(F("tmp"));
       P117_AUTO_CALIBRATION   = isFormItemChecked(F("abc")) ? 1 : 0;
-      uint16_t interval = getFormItemInt(F("pinterval"));
-
-      if (interval < 2) { interval = 2; }
-
-      if (interval > 1800) { interval = 1800; }
-      P117_MEASURE_INTERVAL = interval;
+      const uint16_t interval = getFormItemInt(F("pinterval"));
+      P117_MEASURE_INTERVAL = constrain(interval, 2, 1800);
       success               = true;
       break;
     }
     case PLUGIN_INIT:
     {
-      uint16_t interval = P117_MEASURE_INTERVAL;
-
-      if (interval < 2) { interval = 2; }
-
-      if (interval > 1800) { interval = 1800; }
-      P117_MEASURE_INTERVAL = interval;
+      const uint16_t interval = P117_MEASURE_INTERVAL;
+      P117_MEASURE_INTERVAL = constrain(interval, 2, 1800);
       initPluginTaskData(event->TaskIndex,
                          new (std::nothrow) P117_data_struct(P117_SENSOR_ALTITUDE, P117_TEMPERATURE_OFFSET, P117_AUTO_CALIBRATION == 1,
                                                              P117_MEASURE_INTERVAL));
@@ -165,10 +167,10 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
         return success;
       }
 
-      uint16_t scd30_CO2     = 0u;
-      uint16_t scd30_CO2EAvg = 0u;
-      float    scd30_Humid   = 0.0f;
-      float    scd30_Temp    = 0.0f;
+      uint16_t scd30_CO2{};
+      uint16_t scd30_CO2EAvg{};
+      float    scd30_Humid{};
+      float    scd30_Temp{};
 
       switch (P117_data->read_sensor(&scd30_CO2, &scd30_CO2EAvg, &scd30_Temp, &scd30_Humid))
       {
@@ -225,7 +227,7 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
         log                  += concat(F("Calibration: "), event->Par1 == 1 ? F("auto") : F("manual"));
         success               = true;
       } else if (equals(command, F("scdsetfrc")) && (event->Par1 >= 400) && (event->Par1 <= 2000)) {
-        int res = P117_data->setForcedRecalibrationFactor(event->Par1);
+        const int res = P117_data->setForcedRecalibrationFactor(event->Par1);
         log    += strformat(F("SCD30 Forced calibration: %d, result: %d"), event->Par1, res);
         success = true;
       } else if (equals(command, F("scdgetinterval"))) {
@@ -233,7 +235,7 @@ boolean Plugin_117(uint8_t function, struct EventStruct *event, String& string)
         log    += concat(F("Interval: "), value);
         success = true;
       } else if (equals(command, F("scdsetinterval")) && (event->Par1 >= 2) && (event->Par1 <= 1800)) {
-        int res = P117_data->setMeasurementInterval(event->Par1);
+        const int res = P117_data->setMeasurementInterval(event->Par1);
         P117_MEASURE_INTERVAL = event->Par1; // Update device configuration
         log                  += strformat(F("SCD30 Measurement Interval: %d, result: %d"),
                                           event->Par1, res);

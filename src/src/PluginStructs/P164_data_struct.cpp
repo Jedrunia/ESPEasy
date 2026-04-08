@@ -45,21 +45,21 @@
 #define ENS160_REG_DATA_RH      0x32    // Relative humidity used in calculations
 #define ENS160_REG_DATA_MISR    0x38    //Data integrity field (optional)
 #define ENS160_REG_GPR_WRITE_0  0x40    // General purpose write registers [8 bytes]
-#define ENS160_REG_GPR_WRITE_1  ENS160_REG_GPR_WRITE_0 + 1
-#define ENS160_REG_GPR_WRITE_2  ENS160_REG_GPR_WRITE_0 + 2
-#define ENS160_REG_GPR_WRITE_3  ENS160_REG_GPR_WRITE_0 + 3
-#define ENS160_REG_GPR_WRITE_4  ENS160_REG_GPR_WRITE_0 + 4
-#define ENS160_REG_GPR_WRITE_5  ENS160_REG_GPR_WRITE_0 + 5
-#define ENS160_REG_GPR_WRITE_6  ENS160_REG_GPR_WRITE_0 + 6
-#define ENS160_REG_GPR_WRITE_7  ENS160_REG_GPR_WRITE_0 + 7
+#define ENS160_REG_GPR_WRITE_1  (ENS160_REG_GPR_WRITE_0 + 1)
+#define ENS160_REG_GPR_WRITE_2  (ENS160_REG_GPR_WRITE_0 + 2)
+#define ENS160_REG_GPR_WRITE_3  (ENS160_REG_GPR_WRITE_0 + 3)
+#define ENS160_REG_GPR_WRITE_4  (ENS160_REG_GPR_WRITE_0 + 4)
+#define ENS160_REG_GPR_WRITE_5  (ENS160_REG_GPR_WRITE_0 + 5)
+#define ENS160_REG_GPR_WRITE_6  (ENS160_REG_GPR_WRITE_0 + 6)
+#define ENS160_REG_GPR_WRITE_7  (ENS160_REG_GPR_WRITE_0 + 7)
 #define ENS160_REG_GPR_READ_0   0x48    // General purpose read registers [8 bytes]
-#define ENS160_REG_GPR_READ_1   ENS160_REG_GPR_READ_0 + 1
-#define ENS160_REG_GPR_READ_2   ENS160_REG_GPR_READ_0 + 2
-#define ENS160_REG_GPR_READ_3   ENS160_REG_GPR_READ_0 + 3
-#define ENS160_REG_GPR_READ_4   ENS160_REG_GPR_READ_0 + 4
-#define ENS160_REG_GPR_READ_5   ENS160_REG_GPR_READ_0 + 5
-#define ENS160_REG_GPR_READ_6   ENS160_REG_GPR_READ_0 + 6
-#define ENS160_REG_GPR_READ_7   ENS160_REG_GPR_READ_0 + 7
+#define ENS160_REG_GPR_READ_1   (ENS160_REG_GPR_READ_0 + 1)
+#define ENS160_REG_GPR_READ_2   (ENS160_REG_GPR_READ_0 + 2)
+#define ENS160_REG_GPR_READ_3   (ENS160_REG_GPR_READ_0 + 3)
+#define ENS160_REG_GPR_READ_4   (ENS160_REG_GPR_READ_0 + 4)
+#define ENS160_REG_GPR_READ_5   (ENS160_REG_GPR_READ_0 + 5)
+#define ENS160_REG_GPR_READ_6   (ENS160_REG_GPR_READ_0 + 6)
+#define ENS160_REG_GPR_READ_7   (ENS160_REG_GPR_READ_0 + 7)
 
 // ENS160_REG_PART_ID values for Chip ID 
 #define ENS160_PARTID           0x0160  // ENS160
@@ -141,13 +141,13 @@ bool P164_data_struct::begin()
 {
   // Start connecting the device over I2C
   if (!start(i2cAddress)) {
-    addLogMove(LOG_LEVEL_ERROR, F("P164: device initialization FAILED"));
+    addLog(LOG_LEVEL_ERROR, F("P164: device initialization FAILED"));
     return false;
   }
   setMode(ENS160_OPMODE_STD); // For now we only support the standard acquisition mode
 
   #ifdef P164_ENS160_DEBUG
-    addLogMove(LOG_LEVEL_DEBUG, F("P164: begin(): success"));
+    addLog(LOG_LEVEL_DEBUG, F("P164: begin(): success"));
   #endif
   return true;
 }
@@ -155,23 +155,25 @@ bool P164_data_struct::begin()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Fetch the processed device values as stored in the software object                            //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool P164_data_struct::read(float& tvoc, float& eco2)
+bool P164_data_struct::read(float& tvoc, float& eco2, float& aqi)
 {
   bool success = measure();       // Read measurement values from device
   tvoc = (float)_data_tvoc;       // Latest acquired TVOC value
   eco2 = (float)_data_eco2;       // Latest aquired eCO2 value
+  aqi = (float)_data_aqi;         // Latest aquired AQI value
   return success;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Fetch the processed device values as stored in the software object using compensation         //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool P164_data_struct::read(float& tvoc, float& eco2, float temp, float hum)
+bool P164_data_struct::read(float& tvoc, float& eco2, float& aqi, float temp, float hum)
 {
   this->set_envdata(temp, hum);   // Write new compensation temp & hum to device
   bool success = measure();       // Read measurement values from device
   tvoc = (float)_data_tvoc;       // Latest acquired TVOC value
   eco2 = (float)_data_eco2;       // Latest aquired eCO2 value
+  aqi = (float)_data_aqi;         // Latest aquired AQI value
   return success;
 }
 
@@ -419,6 +421,9 @@ bool P164_data_struct::evaluateState()
 
       switch (this->_opmode) {
         case ENS160_OPMODE_DEEP_SLEEP:
+          this->writeMode(ENS160_OPMODE_DEEP_SLEEP); // Put device into DEEPSLEEP mode
+          newState = P164_STATE_DEEPSLEEP;
+          break;
         case P164_STATE_IDLE:
         case ENS160_OPMODE_RESET:
           this->writeMode(ENS160_OPMODE_IDLE); // Move through Idle state
@@ -725,7 +730,7 @@ bool P164_data_struct::getFirmware() {
   }
   if (! IS_NEWGPR(this->_statusReg)) {                // Check if firmware could be read
     result = false;
-    addLogMove(LOG_LEVEL_ERROR, F("P164: Could not read firmware version"));
+    addLog(LOG_LEVEL_ERROR, F("P164: Could not read firmware version"));
   }
 
   if (result)  {

@@ -114,6 +114,7 @@ String P094_data_struct::saveFilters(struct EventStruct *event) const
   String res;
   const size_t nrFilters = _filters.size();
   size_t currentFilter = 0;
+  size_t actualNrFilters = 0;
   const size_t chunkSize = P094_filter::getBinarySize();
   const size_t nrChunks  = 8;
   #ifdef ESP32
@@ -141,11 +142,15 @@ String P094_data_struct::saveFilters(struct EventStruct *event) const
         memcpy(writePos, binaryData, size);
         writePos  += size;
         writeSize += size;
+        ++actualNrFilters;
       }
       ++currentFilter;
     }
     res              = SaveCustomTaskSettings(event->TaskIndex, &buffer[0], bufferSize, offset_in_block);
     offset_in_block += bufferSize;
+  }
+  if (P094_NR_FILTERS < actualNrFilters) {
+    P094_NR_FILTERS = actualNrFilters;
   }
   return res;
 }
@@ -175,7 +180,8 @@ bool P094_data_struct::addFilter(struct EventStruct *event, const String& filter
 
   _filters.push_back(f);
 
-  std::sort(_filters.begin(), _filters.end());
+  // No sorting as this may have unexpected side-effects
+  // std::sort(_filters.begin(), _filters.end());
 
   if (P094_NR_FILTERS < _filters.size()) {
     P094_NR_FILTERS = _filters.size();
@@ -588,7 +594,7 @@ bool P094_data_struct::loop() {
 
           for (size_t i = 0; i < length && valid; ++i) {
             if ((sentence_part[i] > 127) || (sentence_part[i] < 32)) {
-              sentence_part = String();
+              free_string(sentence_part);
               ++sentences_received_error;
               valid = false;
             }
@@ -647,7 +653,6 @@ const String& P094_data_struct::peekSentence() const {
 
 void P094_data_struct::getSentence(String& string, bool appendSysTime) {
   string        = std::move(sentence_part);
-  sentence_part = String(); // FIXME TD-er: Should not be needed as move already cleared it.
 
   if (appendSysTime) {
     // Unix timestamp = 10 decimals + separator

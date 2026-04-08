@@ -32,17 +32,11 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_048;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_NONE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].ValueCount         = 0;
-      Device[deviceCount].SendDataOption     = false;
-      Device[deviceCount].TimerOption        = false;
-      Device[deviceCount].I2CNoDeviceCheck   = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number           = PLUGIN_ID_048;
+      dev.Type             = DEVICE_TYPE_I2C;
+      dev.VType            = Sensor_VType::SENSOR_TYPE_NONE;
+      dev.I2CNoDeviceCheck = true;
       break;
     }
 
@@ -160,10 +154,11 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
                 speed = p4_int;
               }
               AFMS.begin();
-
+#ifndef BUILD_NO_DEBUG
               if (loglevelActiveFor(LOG_LEVEL_INFO)) {
                 addLog(LOG_LEVEL_INFO, strformat(F("DCMotor%s->Forward Speed: %d"), param2.c_str(), speed));
               }
+#endif
               myMotor->setSpeed(speed);
               myMotor->run(FORWARD);
               success = true;
@@ -177,11 +172,11 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
                 speed = p4_int;
               }
               AFMS.begin();
-
+#ifndef BUILD_NO_DEBUG
               if (loglevelActiveFor(LOG_LEVEL_INFO)) {
                 addLog(LOG_LEVEL_INFO, strformat(F("DCMotor%s->Backward Speed: %d"), param2.c_str(), speed));
               }
-
+#endif
               myMotor->setSpeed(speed);
               myMotor->run(BACKWARD);
               success = true;
@@ -190,10 +185,11 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
             if (equals(param3, F("release")))
             {
               AFMS.begin();
-
+#ifndef BUILD_NO_DEBUG
               if (loglevelActiveFor(LOG_LEVEL_INFO)) {
                 addLog(LOG_LEVEL_INFO, strformat(F("DCMotor%s->Release"), param2.c_str()));
               }
+#endif
               myMotor->run(RELEASE);
               success = true;
             }
@@ -253,10 +249,11 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
                   myStepper->step(steps, FORWARD, MICROSTEP);
                   success = true;
                 }
-
+#ifndef BUILD_NO_DEBUG
                 if (success && loglevelActiveFor(LOG_LEVEL_INFO)) {
                   addLog(LOG_LEVEL_INFO, strformat(F("Stepper%s->Forward Steps: %d %s"), param2.c_str(), steps, param5.c_str()));
                 }
+#endif
               }
             }
 
@@ -293,20 +290,22 @@ boolean Plugin_048(uint8_t function, struct EventStruct *event, String& string) 
                   myStepper->step(steps, BACKWARD, MICROSTEP);
                   success = true;
                 }
-
+#ifndef BUILD_NO_DEBUG
                 if (success && loglevelActiveFor(LOG_LEVEL_INFO)) {
                   addLog(LOG_LEVEL_INFO, strformat(F("Stepper%s->Backward Steps: %d %s"), param2.c_str(), steps, param5.c_str()));
                 }
+#endif
               }
             }
 
             if (equals(param3, F("release")))
             {
               AFMS.begin();
-
+#ifndef BUILD_NO_DEBUG
               if (loglevelActiveFor(LOG_LEVEL_INFO)) {
                 addLog(LOG_LEVEL_INFO, strformat(F("Stepper%s->Release."), param2.c_str()));
               }
+#endif
               myStepper->release();
               success = true;
             }

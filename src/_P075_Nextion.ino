@@ -3,7 +3,7 @@
 
 # include "src/PluginStructs/P075_data_struct.h"
 
-# include "src/ESPEasyCore/ESPEasyWifi.h"
+# include "ESPEasy/net/wifi/ESPEasyWifi.h"
 
 // #######################################################################################################
 // #######################################################################################################
@@ -15,6 +15,7 @@
 //
 
 /** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported for Nextion)
  * 2022-09-27 tonhuisman: Use Changelog formatted updates
  *                        Extend nr. of lines available for text/commands to 20, minor code improvements
  * Updated: Oct-03-2018, ThomasB.
@@ -49,31 +50,25 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_075;
-      Device[deviceCount].Type               = DEVICE_TYPE_SERIAL;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_DUAL;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false; // Pullup is not used.
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].ValueCount         = 2;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = true; // Allow user to disable interval function.
-      Device[deviceCount].GlobalSyncOption   = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_075;
+      dev.Type           = DEVICE_TYPE_SERIAL;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_DUAL;
+      dev.ValueCount     = 2;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true; // Allow user to disable interval function.
 
       // FIXME TD-er: Not sure if access to any existing task data is needed when saving
-      Device[deviceCount].ExitTaskBeforeSave = false;
+      dev.ExitTaskBeforeSave = false;
 
       break;
     }
-
 
     case PLUGIN_GET_DEVICENAME: {
       string = F(PLUGIN_NAME_075);
       break;
     }
-
 
     case PLUGIN_GET_DEVICEVALUENAMES: {
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_075));
@@ -81,6 +76,14 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
       break;
     }
 
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_GET_DEVICEGPIONAMES: {
       serialHelper_getGpioNames(event);
@@ -96,14 +99,16 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SHOW_SERIAL_PARAMS:
     {
-      const __FlashStringHelper *options[4] = {
+      const __FlashStringHelper *options[] = {
         F("9600"),
         F("38400"),
         F("57600"),
         F("115200")
       };
 
-      addFormSelector(F("Baud Rate"), F("baud"), 4, options, nullptr, P075_BaudRate);
+      constexpr size_t optionCount = NR_ELEMENTS(options);
+      const FormSelectorOptions selector(optionCount, options);
+      selector.addFormSelector(F("Baud Rate"), F("baud"), P075_BaudRate);
       addUnit(F("baud"));
       break;
     }
@@ -165,17 +170,9 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
         strcpy(ExtraTaskSettings.TaskDeviceName, PLUGIN_DEFAULT_NAME); // Name missing, populate default name.
       }
 
-      //        PCONFIG(0) = isFormItemChecked(F("AdvHwSerial"));
       P075_BaudRate      = getFormItemInt(F("baud"));
       P075_IncludeValues = isFormItemChecked(F("IncludeValues"));
 
-      /* Task will be stopped and restarted, so no reason to reload the display here
-         P075_data_struct *P075_data = static_cast<P075_data_struct *>(getPluginTaskData(event->TaskIndex));
-
-         if (nullptr != P075_data) {
-         P075_data->loadDisplayLines(event->TaskIndex);
-         }
-       */
       success = true;
       break;
     }
@@ -185,8 +182,8 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
       uint8_t BaudCode = P075_BaudRate;
 
       if (BaudCode > P075_B115200) { BaudCode = P075_B9600; }
-      const uint32_t BaudArray[4]  = { 9600UL, 38400UL, 57600UL, 115200UL };
-      const ESPEasySerialPort port = static_cast<ESPEasySerialPort>(CONFIG_PORT);
+      constexpr uint32_t BaudArray[] = { 9600UL, 38400UL, 57600UL, 115200UL };
+      const ESPEasySerialPort port   = static_cast<ESPEasySerialPort>(CONFIG_PORT);
       initPluginTaskData(event->TaskIndex, new (std::nothrow) P075_data_struct(port, CONFIG_PIN1, CONFIG_PIN2, BaudArray[BaudCode]));
       P075_data_struct *P075_data = static_cast<P075_data_struct *>(getPluginTaskData(event->TaskIndex));
 
@@ -218,7 +215,7 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
             if (RssiIndex >= 0) {
               newString = concat(
                 P075_data->displayLines[x].substring(0, RssiIndex),
-                GetRSSI_quality() * 10);
+                ESPEasy::net::wifi::GetRSSI_quality() * 10);
             }
             else {
               String tmpString(P075_data->displayLines[x]);
@@ -298,8 +295,8 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
         break;
       }
 
-      if (P075_data->rxPin < 0) {
-        addLog(LOG_LEVEL_INFO, F("NEXTION075 : Missing RxD Pin, aborted serial receive"));
+      if (!validGpio(P075_data->rxPin)) {
+//        addLog(LOG_LEVEL_INFO, F("NEXTION075 : Missing RxD Pin, aborted serial receive"));
         break;
       }
 
@@ -383,7 +380,7 @@ boolean Plugin_075(uint8_t function, struct EventStruct *event, String& string)
               String tmpString = __buffer;
 
               # ifdef P075_DEBUG_LOG
-              addLogMove(LOG_LEVEL_INFO,  concat(F("NEXTION075 : Code = "), tmpString));
+              addLogMove(LOG_LEVEL_INFO, concat(F("NEXTION075 : Code = "), tmpString));
               # endif // ifdef P075_DEBUG_LOG
 
               int argIndex = tmpString.indexOf(F(",i"));
@@ -472,9 +469,11 @@ void P075_sendCommand(taskIndex_t taskIndex, const char *cmd)
       P075_data->easySerial->write(0xff);
       P075_data->easySerial->write(0xff);
     }
+#ifndef BUILD_NO_DEBUG
     else {
       addLog(LOG_LEVEL_INFO, F("NEXTION075 : P075_data->easySerial error, aborted sendCommand"));
     }
+#endif    
   }
 }
 

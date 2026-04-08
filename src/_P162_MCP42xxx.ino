@@ -6,6 +6,8 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-08-13 tonhuisman: Enable use of secondary SPI bus
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
  * 2024-04-16 tonhuisman: Add Send values on change option, so Interval can be set to 0, and the data will be sent when changed
  * 2024-04-10 tonhuisman: Initial version. Support for Digipot MCP42xxx (dual channel) and MCP41xxx (single channel).
  *                        No support for daisy-chaining (MCP42xxx can do that, but not implemented)
@@ -29,17 +31,17 @@ boolean Plugin_162(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number         = PLUGIN_ID_162;
-      Device[deviceCount].Type             = DEVICE_TYPE_SPI3;
-      Device[deviceCount].VType            = Sensor_VType::SENSOR_TYPE_DUAL;
-      Device[deviceCount].Ports            = 0;
-      Device[deviceCount].ValueCount       = 2;
-      Device[deviceCount].SendDataOption   = true;
-      Device[deviceCount].TimerOption      = true;
-      Device[deviceCount].TimerOptional    = true;
-      Device[deviceCount].GlobalSyncOption = true;
-      Device[deviceCount].FormulaOption    = true;
-      Device[deviceCount].PluginStats      = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_162;
+      dev.Type           = DEVICE_TYPE_SPI3;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_DUAL;
+      dev.ValueCount     = 2;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.FormulaOption  = true;
+      dev.PluginStats    = true;
+      dev.SpiBusSelect   = true;
       break;
     }
 
@@ -55,6 +57,16 @@ boolean Plugin_162(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_162));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_ANALOG_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_ANALOG_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_GET_DEVICEGPIONAMES:                                   // define 'GPIO 1st' name in webserver
     {
@@ -113,7 +125,9 @@ boolean Plugin_162(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
     {
-      initPluginTaskData(event->TaskIndex, new (std::nothrow) P162_data_struct(P162_CS_PIN, P162_RST_PIN, P162_SHD_PIN));
+      initPluginTaskData(
+        event->TaskIndex, 
+        new (std::nothrow) P162_data_struct(P162_RST_PIN, P162_SHD_PIN));
       P162_data_struct *P162_data = static_cast<P162_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr != P162_data) {

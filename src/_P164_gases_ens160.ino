@@ -6,13 +6,17 @@
 // #######################################################################################################
 // P164 "GASES - ENS16x (TVOC, eCO2)"
 // Plugin for ENS160 & ENS161 TVOC and eCO2 sensor with I2C interface from ScioSense
-// For documentation of the ENS160 hardware device see 
+// For documentation of the ENS160 hardware device see
 // https://www.sciosense.com/wp-content/uploads/documents/SC-001224-DS-9-ENS160-Datasheet.pdf
 //
 // PLugin code:
 // 2023 By flashmark
 // #######################################################################################################
 
+/** Changelog:
+ * 2025-01-23 tonhuisman: Add support for AQI MQTT AutoDiscovery
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (partially)
+ */
 # include "src/PluginStructs/P164_data_struct.h"
 
 # define PLUGIN_164
@@ -20,6 +24,7 @@
 # define PLUGIN_NAME_164       "Gases - ENS16x"
 # define PLUGIN_VALUENAME1_164 "TVOC"
 # define PLUGIN_VALUENAME2_164 "eCO2"
+# define PLUGIN_VALUENAME3_164 "AQI"
 
 boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
 {
@@ -29,18 +34,15 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_164;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_DUAL;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 2;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_164;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_DUAL;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 3;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -54,8 +56,24 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
     {
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_164));
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_164));
+      strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[2], PSTR(PLUGIN_VALUENAME3_164));
+
+      for (int i = 0; i < 3; ++i) {
+        ExtraTaskSettings.TaskDeviceValueDecimals[i] = 0;
+      }
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_TVOC_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_CO2_ONLY);
+      event->Par3 = static_cast<int>(Sensor_VType::SENSOR_TYPE_AQI_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -85,7 +103,7 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
     case PLUGIN_SET_DEFAULTS:
     {
       P164_PCONFIG_I2C_ADDR = P164_ENS160_I2CADDR_1;
-      success = true;
+      success               = true;
       break;
     }
 
@@ -103,14 +121,15 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
       P164_data_struct *P164_data = static_cast<P164_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr == P164_data) {
-        addLogMove(LOG_LEVEL_ERROR, F("P164: plugin_read NULLPTR"));
+        addLog(LOG_LEVEL_ERROR, F("P164: plugin_read NULLPTR"));
         break;
       }
 
-      float temperature = 20.0f;  // A reasonable value in case temperature source task is invalid
-      float humidity = 50.0f;     // A reasonable value in case humidity source task is invalid
-      float tvoc = 0.0f;          // tvoc value to be retrieved from device
-      float eco2 = 0.0f;          // eCO2 value to be retrieved from device
+      float temperature = 20.0f; // A reasonable value in case temperature source task is invalid
+      float humidity    = 50.0f; // A reasonable value in case humidity source task is invalid
+      float tvoc        = 0.0f;  // tvoc value to be retrieved from device
+      float eco2        = 0.0f;  // eCO2 value to be retrieved from device
+      float aqi         = 0.0f;  // AQI value to be retrieved from device
 
       if (validTaskIndex(P164_PCONFIG_TEMP_TASK) && validTaskIndex(P164_PCONFIG_HUM_TASK))
       {
@@ -118,9 +137,10 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
         temperature = UserVar.getFloat(P164_PCONFIG_TEMP_TASK, P164_PCONFIG_TEMP_VAL); // in degrees C
         humidity    = UserVar.getFloat(P164_PCONFIG_HUM_TASK, P164_PCONFIG_HUM_VAL);   // in % relative
       }
-      success = P164_data->read(tvoc, eco2, temperature, humidity);
+      success = P164_data->read(tvoc, eco2, aqi, temperature, humidity);
       UserVar.setFloat(event->TaskIndex, 0, tvoc);
       UserVar.setFloat(event->TaskIndex, 1, eco2);
+      UserVar.setFloat(event->TaskIndex, 2, aqi);
       break;
     }
 
@@ -135,11 +155,23 @@ boolean Plugin_164(uint8_t function, struct EventStruct *event, String& string)
       success = P164_data_struct::webformSave(event);
       break;
     }
+    case PLUGIN_SET_CONFIG:
+    {
+      P164_data_struct *P164_data = static_cast<P164_data_struct *>(getPluginTaskData(event->TaskIndex));
+      const String cmd = parseString(string, 1);
+
+      // command: config,task,<taskname>,sleep
+      if (equals(cmd, F("sleep"))) {
+        P164_data->setMode(0x00);
+      }
+      break;
+    }
 
     case PLUGIN_TEN_PER_SECOND:
     {
       P164_data_struct *P164_data =
         static_cast<P164_data_struct *>(getPluginTaskData(event->TaskIndex));
+
       if (nullptr == P164_data) {
         break;
       }

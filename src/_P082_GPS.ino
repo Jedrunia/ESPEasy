@@ -10,7 +10,11 @@
 // Based on the library TinyGPS++
 // http://arduiniana.org/libraries/tinygpsplus/
 //
-//
+
+/** Changelog:
+ * 2025-06-14 tonhuisman: Add support for Custom Value Type per task value
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery (not supported yet for GPS)
+ */
 
 # include <ESPeasySerial.h>
 # include <TinyGPS++.h>
@@ -30,29 +34,22 @@
 # define PLUGIN_VALUENAME4_082 "Speed"
 
 
-
-// Must use volatile declared variable (which will end up in iRAM)
-volatile unsigned long P082_pps_time = 0;
-void    Plugin_082_interrupt() IRAM_ATTR;
-
 boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) {
   boolean success = false;
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_082;
-      Device[deviceCount].Type               = DEVICE_TYPE_SERIAL_PLUS1;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_QUAD;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 4;
-      Device[deviceCount].OutputDataType     = Output_Data_type_t::Simple;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_082;
+      dev.Type           = DEVICE_TYPE_SERIAL_PLUS1;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_QUAD;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 4;
+      dev.OutputDataType = Output_Data_type_t::Simple;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
+      dev.CustomVTypeVar = true;
       break;
     }
 
@@ -106,6 +103,22 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
       event->String3 = formatGpioName_input_optional(F("PPS"));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      #  if FEATURE_CUSTOM_TASKVAR_VTYPE
+
+      for (uint8_t i = 0; i < event->Par5; ++i) {
+        event->ParN[i] = ExtraTaskSettings.getTaskVarCustomVType(i);  // Custom/User selection
+      }
+      #  else // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_NONE); // Not yet supported
+      #  endif // if FEATURE_CUSTOM_TASKVAR_VTYPE
+      success = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER || FEATURE_CUSTOM_TASKVAR_VTYPE
 
     case PLUGIN_SET_DEFAULTS:
     {
@@ -188,21 +201,23 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
       addFormSubHeader(F("U-Blox specific"));
 
       {
-        const __FlashStringHelper *options[3] = {
+        const __FlashStringHelper *options[] = {
           toString(P082_PowerMode::Max_Performance),
           toString(P082_PowerMode::Power_Save),
           toString(P082_PowerMode::Eco)
         };
-        const int indices[3] = {
+        const int indices[] = {
           static_cast<int>(P082_PowerMode::Max_Performance),
           static_cast<int>(P082_PowerMode::Power_Save),
           static_cast<int>(P082_PowerMode::Eco)
         };
-        addFormSelector(F("Power Mode"), F("pwrmode"), 3, options, indices, P082_POWER_MODE);
+        constexpr size_t optionCount = NR_ELEMENTS(indices);
+        const FormSelectorOptions selector(optionCount, options, indices);
+        selector.addFormSelector(F("Power Mode"), F("pwrmode"), P082_POWER_MODE);
       }
 
       {
-        const __FlashStringHelper *options[10] = {
+        const __FlashStringHelper *options[] = {
           toString(P082_DynamicModel::Portable),
           toString(P082_DynamicModel::Stationary),
           toString(P082_DynamicModel::Pedestrian),
@@ -214,7 +229,7 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
           toString(P082_DynamicModel::Wrist),
           toString(P082_DynamicModel::Bike)
         };
-        const int indices[10] = {
+        const int indices[] = {
           static_cast<int>(P082_DynamicModel::Portable),
           static_cast<int>(P082_DynamicModel::Stationary),
           static_cast<int>(P082_DynamicModel::Pedestrian),
@@ -226,7 +241,9 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
           static_cast<int>(P082_DynamicModel::Wrist),
           static_cast<int>(P082_DynamicModel::Bike)
         };
-        addFormSelector(F("Dynamic Platform Model"), F("dynmodel"), 10, options, indices, P082_DYNAMIC_MODEL);
+        constexpr size_t optionCount = NR_ELEMENTS(indices);
+        const FormSelectorOptions selector(optionCount, options, indices);
+        selector.addFormSelector(F("Dynamic Platform Model"), F("dynmodel"), P082_DYNAMIC_MODEL);
       }
 # endif // P082_USE_U_BLOX_SPECIFIC
 
@@ -293,9 +310,10 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
         static_cast<P082_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr != P082_data) {
-        #if FEATURE_CHART_JS
+        #  if FEATURE_CHART_JS
         P082_data->webformLoad_show_position_scatterplot(event);
-        #endif
+        #  endif // if FEATURE_CHART_JS
+
         for (uint8_t i = 0; i < P082_NR_OUTPUT_VALUES; ++i) {
           const uint8_t pconfigIndex = i + P082_QUERY1_CONFIG_POS;
 
@@ -317,11 +335,7 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
       const int16_t serial_tx      = CONFIG_PIN2;
       const int16_t pps_pin        = CONFIG_PIN3;
 
-      # ifdef USE_SECOND_HEAP
-      HeapSelectIram ephemeral;
-      # endif // ifdef USE_SECOND_HEAP
-
-      initPluginTaskData(event->TaskIndex, new (std::nothrow) P082_data_struct());
+      special_initPluginTaskData(event->TaskIndex, P082_data_struct);
       P082_data_struct *P082_data =
         static_cast<P082_data_struct *>(getPluginTaskData(event->TaskIndex));
 
@@ -329,14 +343,10 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
         return success;
       }
 
-      if (P082_data->init(port, serial_rx, serial_tx)) {
+      if (P082_data->init(port, serial_rx, serial_tx, pps_pin)) {
         success = true;
         serialHelper_log_GpioDescription(port, serial_rx, serial_tx);
 
-        if (validGpio(pps_pin)) {
-          //          pinMode(pps_pin, INPUT_PULLUP);
-          attachInterrupt(pps_pin, Plugin_082_interrupt, RISING);
-        }
         # ifdef P082_USE_U_BLOX_SPECIFIC
         P082_data->setPowerMode(static_cast<P082_PowerMode>(P082_POWER_MODE));
         P082_data->setDynamicModel(static_cast<P082_DynamicModel>(P082_DYNAMIC_MODEL));
@@ -440,6 +450,14 @@ boolean Plugin_082(uint8_t function, struct EventStruct *event, String& string) 
             P082_setOutputValue(event, static_cast<uint8_t>(P082_query::P082_QUERY_SPD), P082_data->gps->speed.mps());
             # ifndef BUILD_NO_DEBUG
             addLog(LOG_LEVEL_DEBUG, F("GPS: Speed update."));
+            # endif // ifndef BUILD_NO_DEBUG
+            success = true;
+          }
+
+          if (P082_data->gps->course.isUpdated()) {
+            P082_setOutputValue(event, static_cast<uint8_t>(P082_query::P082_QUERY_COURSE), P082_data->gps->course.deg());
+            # ifndef BUILD_NO_DEBUG
+            addLog(LOG_LEVEL_DEBUG, F("GPS: Course update."));
             # endif // ifndef BUILD_NO_DEBUG
             success = true;
           }
@@ -582,7 +600,7 @@ void P082_setOutputValue(struct EventStruct *event, uint8_t outputType, float va
     const uint8_t pconfigIndex = i + P082_QUERY1_CONFIG_POS;
 
     if (PCONFIG(pconfigIndex) == outputType) {
-      UserVar.setFloat(event->TaskIndex, i,  value);
+      UserVar.setFloat(event->TaskIndex, i, value);
     }
   }
 }
@@ -597,25 +615,16 @@ void P082_logStats(struct EventStruct *event) {
   if ((nullptr == P082_data) || !P082_data->isInitialized()) {
     return;
   }
-  String log;
 
-  if (log.reserve(128)) {
-    log  = F("GPS:");
-    log += F(" Fix: ");
-    log += P082_data->hasFix(P082_TIMEOUT) ? 1 : 0;
-    log += F(" #sat: ");
-    log += P082_data->gps->satellites.value();
-    log += F(" #SNR: ");
-    log += P082_data->gps->satellitesStats.getBestSNR();
-    log += F(" HDOP: ");
-    log += P082_data->gps->hdop.value() / 100.0f;
-    log += F(" Chksum(pass/fail): ");
-    log += P082_data->gps->passedChecksum();
-    log += '/';
-    log += P082_data->gps->failedChecksum();
-    log += F(" invalid: ");
-    log += P082_data->gps->invalidData();
-    addLogMove(LOG_LEVEL_DEBUG, log);
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+    addLogMove(LOG_LEVEL_DEBUG, strformat(F("GPS: Fix: %d #sat: %u #SNR: %u HDOP: %.3f Chksum(pass/fail): %u/%u invalid: %u"),
+                                          P082_data->hasFix(P082_TIMEOUT) ? 1 : 0,
+                                          P082_data->gps->satellites.value(),
+                                          P082_data->gps->satellitesStats.getBestSNR(),
+                                          P082_data->gps->hdop.value() / 100.0f,
+                                          P082_data->gps->passedChecksum(),
+                                          P082_data->gps->failedChecksum(),
+                                          P082_data->gps->invalidData()));
   }
   # endif // ifndef BUILD_NO_DEBUG
 }
@@ -724,12 +733,8 @@ void P082_html_show_stats(struct EventStruct *event) {
 
   addRowLabel(F("UTC Time"));
   struct tm dateTime;
-  uint32_t  age;
-  bool updated;
-  bool pps_sync;
 
-  if (P082_data->getDateTime(dateTime, age, updated, pps_sync)) {
-    dateTime = node_time.addSeconds(dateTime, (age / 1000), false);
+  if (P082_data->getDateTime(dateTime)) {
     addHtml(formatDateTimeString(dateTime));
   } else {
     addHtml('-');
@@ -746,16 +751,17 @@ void P082_html_show_stats(struct EventStruct *event) {
   }
 
   addRowLabel(F("Checksum (pass/fail/invalid)"));
-  {
-    String chksumStats;
+  addHtml(strformat(F("%u/%u/%u"),
+                    P082_data->gps->passedChecksum(),
+                    P082_data->gps->failedChecksum(),
+                    P082_data->gps->invalidData()));
+# ifndef BUILD_NO_DEBUG
 
-    chksumStats  = P082_data->gps->passedChecksum();
-    chksumStats += '/';
-    chksumStats += P082_data->gps->failedChecksum();
-    chksumStats += '/';
-    chksumStats += P082_data->gps->invalidData();
-    addHtml(chksumStats);
-  }
+  /*
+     addRowLabel(F("SW PPS stats"));
+     addHtml(P082_data->getPPSStats());
+   */
+# endif // ifndef BUILD_NO_DEBUG
 }
 
 void P082_setSystemTime(struct EventStruct *event) {
@@ -766,36 +772,7 @@ void P082_setSystemTime(struct EventStruct *event) {
     return;
   }
 
-  if ((timeSource_t::GPS_time_source == node_time.timeSource) &&
-      (P082_data->_last_setSystemTime != 0) &&
-      (timePassedSince(P082_data->_last_setSystemTime) < EXT_TIME_SOURCE_MIN_UPDATE_INTERVAL_MSEC))
-  {
-    // Only update the system time every hour from the same time source.
-    return;
-  }
-
-  struct tm dateTime;
-  uint32_t  age;
-  bool updated;
-  bool pps_sync;
-
-  P082_data->_pps_time = P082_pps_time; // Must copy the interrupt gathered time first.
-
-  if (P082_data->getDateTime(dateTime, age, updated, pps_sync)) {
-    if (updated) {
-      // Use floating point precision to use the time since last update from GPS
-      // and the given offset in centisecond.
-      ESPEASY_RULES_FLOAT_TYPE time = makeTime(dateTime);
-      time += (static_cast<ESPEASY_RULES_FLOAT_TYPE>(age) / static_cast<ESPEASY_RULES_FLOAT_TYPE>(1000));
-      node_time.setExternalTimeSource(time, timeSource_t::GPS_time_source);
-      P082_data->_last_setSystemTime = millis();
-    }
-  }
-  P082_pps_time = 0;
-}
-
-void Plugin_082_interrupt() {
-  P082_pps_time = millis();
+  P082_data->tryUpdateSystemTime();
 }
 
 #endif // USES_P082

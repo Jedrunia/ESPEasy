@@ -7,6 +7,7 @@
 // #######################################################################################################
 
 /** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
  * 2024-04-27 tonhuisman: Read sensor asynchronously to enable (the new default) trigger on changed value
  * 2024-04-26 tonhuisman: Migrate 'Send event when value unchanged' and 'Trigger delta' settings from P113 (at last...)
  *                        Add Direction value, -1 = closer, 0 = unchanged, 1 = further away
@@ -40,19 +41,16 @@ boolean Plugin_110(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_110;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 2;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_110;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 2;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.TimerOptional  = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -68,6 +66,16 @@ boolean Plugin_110(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_110));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_DISTANCE_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_DIRECTION_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     case PLUGIN_WEBFORM_SHOW_I2C_PARAMS:
@@ -97,20 +105,23 @@ boolean Plugin_110(uint8_t function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_LOAD:
     {
       {
-        const __FlashStringHelper *optionsMode2[3] = {
+        const __FlashStringHelper *optionsMode2[] = {
           F("Normal"),
           F("Fast"),
           F("Accurate") };
-        const int optionValuesMode2[3] = { 80, 20, 320 };
-        addFormSelector(F("Timing"), F("ptiming"), 3, optionsMode2, optionValuesMode2, P110_TIMING);
+        const int optionValuesMode2[] = { 80, 20, 320 };
+        constexpr size_t optionCount  = NR_ELEMENTS(optionValuesMode2);
+        const FormSelectorOptions selector(optionCount, optionsMode2, optionValuesMode2);
+        selector.addFormSelector(F("Timing"), F("ptiming"), P110_TIMING);
       }
 
       {
-        const __FlashStringHelper *optionsMode3[2] = {
+        const __FlashStringHelper *optionsMode3[] = {
           F("Normal"),
           F("Long") };
-        const int optionValuesMode3[2] = { 0, 1 };
-        addFormSelector(F("Range"), F("prange"), 2, optionsMode3, optionValuesMode3, P110_RANGE);
+        constexpr size_t optionCount = NR_ELEMENTS(optionsMode3);
+        const FormSelectorOptions selector(optionCount, optionsMode3);
+        selector.addFormSelector(F("Range"), F("prange"), P110_RANGE);
       }
       addFormCheckBox(F("Send event when value unchanged"), F("notchanged"), P110_SEND_ALWAYS == 1);
       addFormNote(F("When checked, 'Trigger delta' setting is ignored!"));
@@ -142,7 +153,13 @@ boolean Plugin_110(uint8_t function, struct EventStruct *event, String& string)
       initPluginTaskData(event->TaskIndex, new (std::nothrow) P110_data_struct(P110_I2C_ADDRESS, P110_TIMING, P110_RANGE == 1));
       P110_data_struct *P110_data = static_cast<P110_data_struct *>(getPluginTaskData(event->TaskIndex));
 
-      success = (nullptr != P110_data) && P110_data->begin(); // Start the sensor
+      if (nullptr != P110_data) {
+        const uint32_t interval_ms = Settings.TaskDeviceTimer[event->TaskIndex] * 1000;
+
+        // Clear the "previous" distance so there will be a new result when starting the task
+        UserVar.setFloat(event->TaskIndex, 3, -1);
+        success = P110_data->begin(interval_ms); // Start the sensor
+      }
       break;
     }
     case PLUGIN_READ:
@@ -150,48 +167,16 @@ boolean Plugin_110(uint8_t function, struct EventStruct *event, String& string)
       P110_data_struct *P110_data = static_cast<P110_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr != P110_data) {
-        const uint16_t dist      = P110_data->getDistance();
-        const uint16_t p_dist    = UserVar.getFloat(event->TaskIndex, 0);
-        const int16_t  direct    = dist == p_dist ? 0 : (dist < p_dist ? -1 : 1);
-        const bool     triggered = (dist > (p_dist + P110_DELTA)) || (dist < (p_dist - P110_DELTA));
-
-        #ifdef P110_INFO_LOG
-
-        if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-          addLog(LOG_LEVEL_INFO, strformat(F("VL53L0x: Perform read: trig: %d, prev: %d, dist: %d"), triggered, p_dist, dist));
-        }
-        #endif // ifdef P110_INFO_LOG
-
-        if (triggered || (P110_SEND_ALWAYS == 1)) {
-          UserVar.setFloat(event->TaskIndex, 0, dist); // Value is classified as invalid when > 8190, so no conversion or 'split' needed
-          UserVar.setFloat(event->TaskIndex, 1, direct);
-          success = true;
-        }
+        success = P110_data->plugin_read(event);
       }
       break;
     }
-
-    case PLUGIN_TEN_PER_SECOND: // Handle sensor reading
+    case PLUGIN_TEN_PER_SECOND: // Handle startup delay and sensor reading
     {
       P110_data_struct *P110_data = static_cast<P110_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if (nullptr != P110_data) {
-        P110_data->readDistance();
-
-        if (P110_data->isReadSuccessful() && (Settings.TaskDeviceTimer[event->TaskIndex] == 0)) { // Trigger as soon as there's a valid
-                                                                                                  // measurement and 0 interval is set
-          Scheduler.schedule_task_device_timer(event->TaskIndex, millis() + 10);
-        }
-      }
-      break;
-    }
-
-    case PLUGIN_FIFTY_PER_SECOND: // Handle startup delay
-    {
-      P110_data_struct *P110_data = static_cast<P110_data_struct *>(getPluginTaskData(event->TaskIndex));
-
-      if (nullptr != P110_data) {
-        success = P110_data->plugin_fifty_per_second();
+        success = P110_data->check_reading_ready(event);
       }
       break;
     }

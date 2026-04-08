@@ -73,7 +73,8 @@ deviceIndex_t getDeviceIndex_from_TaskIndex(taskIndex_t taskIndex);
 pluginID_t getPluginID_from_TaskIndex(taskIndex_t taskIndex);
 
 #if FEATURE_PLUGIN_PRIORITY
-bool       isPluginI2CPowerManager_from_TaskIndex(taskIndex_t taskIndex);
+bool       isPluginI2CPowerManager_from_TaskIndex(taskIndex_t taskIndex,
+                                                  uint8_t     i2cBus);
 #endif // if FEATURE_PLUGIN_PRIORITY
 
 /********************************************************************************************\
@@ -96,12 +97,12 @@ uint8_t getTaskI2CAddress(taskIndex_t taskIndex);
 
 String        getPluginNameFromPluginID(pluginID_t pluginID);
 
-
+#if FEATURE_I2C
 // Prepare I2C bus for next call to task
 // Return false if task is I2C, but I2C bus is not ready
 bool prepare_I2C_by_taskIndex(taskIndex_t taskIndex, deviceIndex_t DeviceIndex);
 void post_I2C_by_taskIndex(taskIndex_t taskIndex, deviceIndex_t DeviceIndex);
-
+#endif
 void loadDefaultTaskValueNames_ifEmpty(taskIndex_t TaskIndex);
 
 /*********************************************************************************************\

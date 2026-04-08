@@ -33,14 +33,18 @@ String appendLineToFile(const String& fname, const String& line);
 
 String appendToFile(const String& fname, const uint8_t *data, unsigned int size);
 
-bool fileExists(const __FlashStringHelper * fname);
-bool fileExists(const String& fname);
-
 enum class FileDestination_e : uint8_t {
   ANY   = 0,
   FLASH = 1,
   SD    = 2,
 };
+
+bool fileExists(const __FlashStringHelper * fname);
+bool fileExists(const __FlashStringHelper *fname, FileDestination_e& destination);
+bool fileExists(const String& fname, FileDestination_e& destination);
+bool fileExists(const String& fname);
+
+int fileSize(const String& fname);
 
 fs::File tryOpenFile(const String& fname, const String& mode, FileDestination_e destination = FileDestination_e::ANY);
 
@@ -60,6 +64,13 @@ bool BuildFixes();
 void fileSystemCheck();
 
 bool FS_format();
+
+#ifdef ESP32
+uint32_t getWiFi_CalibrationVersion();
+
+bool check_and_update_WiFi_Calibration();
+#endif
+bool Erase_WiFi_Calibration();
 
 #ifdef ESP32
 
@@ -141,6 +152,12 @@ uint8_t disableAllNotifications(uint8_t bootFailedCount);
    Disable Rules, based on bootFailedCount
  \*********************************************************************************************/
 uint8_t disableRules(uint8_t bootFailedCount);
+
+/********************************************************************************************\
+   Disable Network Interfaces, based on bootFailedCount
+ \*********************************************************************************************/
+uint8_t disableNetwork(uint8_t bootFailedCount);
+uint8_t disableAllNetworkss(uint8_t bootFailedCount);
 
 
 bool getAndLogSettingsParameters(bool read, SettingsType::Enum settingsType, int index, int& offset, int& max_size);
@@ -264,8 +281,18 @@ String SaveNotificationSettings(int NotificationIndex, const uint8_t *memAddress
    Load Controller settings to file system
  \*********************************************************************************************/
 String LoadNotificationSettings(int NotificationIndex, uint8_t *memAddress, int datasize);
-
 #endif
+
+
+/********************************************************************************************\
+   Handle certificate files on the file system.
+   The content will be stripped from unusable character like quotes, spaces etc.
+ \*********************************************************************************************/
+#if FEATURE_TLS
+String SaveCertificate(const String& fname, const String& certificate);
+String LoadCertificate(const String& fname, String& certificate, bool cleanup = true);
+#endif
+
 /********************************************************************************************\
    Init a file with zeros on file system
  \*********************************************************************************************/
@@ -302,6 +329,8 @@ String ClearInFile(const char *fname, int index, int datasize);
    Load data from config file on file system
  \*********************************************************************************************/
 String LoadFromFile(const char *fname, int offset, uint8_t *memAddress, int datasize);
+
+String LoadFromFile(const char *fname, String& data, int offset = 0);
 
 /********************************************************************************************\
    Wrapper functions to handle errors in accessing settings
@@ -369,6 +398,8 @@ bool validateUploadConfigDat(const uint8_t *buf);
  \*********************************************************************************************/
 #if FEATURE_DOWNLOAD
 String downloadFileType(const String& url, const String& user, const String& pass, FileType::Enum filetype, unsigned int filenr = 0);
+
+void deleteBakFiles();
 
 #endif // if FEATURE_DOWNLOAD
 #if FEATURE_CUSTOM_PROVISIONING

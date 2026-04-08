@@ -10,6 +10,9 @@
 // Based on VEML6070 plugin from Sonoff-Tasmota (https://github.com/arendst/Sonoff-Tasmota)
 // Datasheet: https://www.vishay.com/docs/84277/veml6070.pdf
 
+/** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
+ */
 
 # define PLUGIN_084
 # define PLUGIN_ID_084         84
@@ -43,19 +46,15 @@ boolean Plugin_084(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_084;
-      Device[deviceCount].Type               = DEVICE_TYPE_I2C;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 3;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].TimerOptional      = false;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_084;
+      dev.Type           = DEVICE_TYPE_I2C;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 3;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.PluginStats    = true;
       break;
     }
 
@@ -72,6 +71,16 @@ boolean Plugin_084(uint8_t function, struct EventStruct *event, String& string)
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[2], PSTR(PLUGIN_VALUENAME3_084));
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      event->Par1 = static_cast<int>(Sensor_VType::SENSOR_TYPE_UV_ONLY);
+      event->Par2 = static_cast<int>(Sensor_VType::SENSOR_TYPE_UV_INDEX_ONLY);
+      success     = true;
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_I2C_HAS_ADDRESS:
     {
@@ -90,8 +99,10 @@ boolean Plugin_084(uint8_t function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      const __FlashStringHelper *optionsMode[4] = { F("1/2T"), F("1T"), F("2T"), F("4T (Default)") };
-      addFormSelector(F("Refresh Time Determination"), F("itime"), 4, optionsMode, nullptr, PCONFIG(0));
+      const __FlashStringHelper *optionsMode[] = { F("1/2T"), F("1T"), F("2T"), F("4T (Default)") };
+      constexpr size_t optionCount             = NR_ELEMENTS(optionsMode);
+      const FormSelectorOptions selector(optionCount, optionsMode);
+      selector.addFormSelector(F("Refresh Time Determination"), F("itime"), PCONFIG(0));
 
       success = true;
       break;
@@ -160,9 +171,8 @@ uint16_t VEML6070_ReadUv(bool *status)
   uint16_t uv_raw      = 0;
   bool     wire_status = false;
 
-  uv_raw   = I2C_read8(VEML6070_ADDR_H, &wire_status);
+  uv_raw   = I2C_read8(VEML6070_ADDR_H, &wire_status) << 8;
   *status  = wire_status;
-  uv_raw <<= 8;
   uv_raw  |= I2C_read8(VEML6070_ADDR_L, &wire_status);
   *status &= wire_status;
 

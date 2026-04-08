@@ -2,6 +2,8 @@
 
 #ifdef USES_P141
 
+#include "../Helpers/Hardware_SPI.h"
+
 /****************************************************************************
  * toString: return the command string selected
  ***************************************************************************/
@@ -27,11 +29,19 @@ P141_data_struct::P141_data_struct(uint8_t             rotation,
                                    uint16_t            fgcolor,
                                    uint16_t            bgcolor,
                                    bool                textBackFill,
-                                   bool                displayInverted)
+                                   bool                displayInverted
+                                   # if                ADAGFX_FONTS_INCLUDED
+                                   ,
+                                   const uint8_t       defaultFontId
+                                   # endif // if ADAGFX_FONTS_INCLUDED
+                                   )
   : _rotation(rotation), _fontscaling(fontscaling), _textmode(textmode), _backlightPin(backlightPin),
   _backlightPercentage(backlightPercentage), _contrast(contrast), _displayTimer(displayTimer),
   _displayTimeout(displayTimer), _commandTrigger(commandTrigger), _fgcolor(fgcolor), _bgcolor(bgcolor),
   _textBackFill(textBackFill), _displayInverted(displayInverted)
+  # if ADAGFX_FONTS_INCLUDED
+  , _defaultFontId(defaultFontId)
+  # endif // if ADAGFX_FONTS_INCLUDED
 {
   _commandTrigger.toLowerCase();
   _commandTriggerCmd = concat(_commandTrigger, F("cmd"));
@@ -48,6 +58,11 @@ P141_data_struct::~P141_data_struct() {
  * plugin_init: Initialize display
  ***************************************************************************/
 bool P141_data_struct::plugin_init(struct EventStruct *event) {
+#ifdef ESP32
+  auto spi_ptr = getSPIBusForTask(event->TaskIndex);
+  if (!spi_ptr) return false;
+#endif
+
   updateFontMetrics();
   bool success = false;
 
@@ -55,10 +70,16 @@ bool P141_data_struct::plugin_init(struct EventStruct *event) {
   ButtonLastState = 0xFF;  // Last state checked (debouncing in progress)
   DebounceCounter = 0;     // debounce counter
 
+
+
   if (nullptr == pcd8544) {
     addLog(LOG_LEVEL_INFO, F("PCD8544: Init start."));
 
-    pcd8544 = new (std::nothrow) Adafruit_PCD8544(P141_DC_PIN, P141_CS_PIN, P141_RST_PIN);
+    pcd8544 = new (std::nothrow) Adafruit_PCD8544(P141_DC_PIN, P141_CS_PIN, P141_RST_PIN
+                                                  # ifdef ESP32
+                                                  , spi_ptr
+                                                  # endif // ifdef ESP32
+                                                  );
     # ifndef BUILD_NO_DEBUG
 
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -89,7 +110,11 @@ bool P141_data_struct::plugin_init(struct EventStruct *event) {
                                                       _fgcolor,
                                                       _bgcolor,
                                                       true,
-                                                      _textBackFill);
+                                                      _textBackFill
+                                                      # if ADAGFX_FONTS_INCLUDED
+                                                      , _defaultFontId
+                                                      # endif // if ADAGFX_FONTS_INCLUDED
+                                                      );
 
     displayOnOff(true);
 

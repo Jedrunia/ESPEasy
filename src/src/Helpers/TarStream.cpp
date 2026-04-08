@@ -32,10 +32,10 @@ TarFileInfo_struct::TarFileInfo_struct(const String fname,
  */
 TarStream::TarStream() {}
 
-TarStream::TarStream(const String fileName)
+TarStream::TarStream(const String& fileName)
   : _fileName(fileName) {}
 
-TarStream::TarStream(const String fileName, FileDestination_e destination)
+TarStream::TarStream(const String& fileName, FileDestination_e destination)
   : _fileName(fileName), _destination(destination) {}
 
 TarStream::~TarStream() {
@@ -44,7 +44,7 @@ TarStream::~TarStream() {
 
 size_t TarStream::write(uint8_t ch) {
   // TODO implement
-  addLogMove(LOG_LEVEL_ERROR, F("TarStream: write(ch) NOT IMPLEMENTED YET."));
+  addLog(LOG_LEVEL_ERROR, F("TarStream: write(ch) NOT IMPLEMENTED YET."));
   return 1u;
 }
 
@@ -305,7 +305,7 @@ size_t TarStream::write(const uint8_t *buf,
         break;
     }
 
-    if (bufOffset < size) { // We got leftover bytes
+    if (bufOffset < size && _streamState != TarStreamState_e::Error) { // We got leftover bytes
       stayInLoop = true;
     }
   }
@@ -446,6 +446,8 @@ int TarStream::read() {
       if (!((TarStreamState_e::ReadingSlack == _streamState) && (_currentIndex.fileSize == 0))) {
         break; // Special 0-file case
       }
+
+      // Fall through
     }
     case TarStreamState_e::ReadingFile:
     {

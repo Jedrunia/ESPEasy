@@ -13,7 +13,9 @@ Type: |P164_type|
 
 Name: |P164_name|
 
-Status: |P164_status|
+Status ESP32: |P164_status|
+
+Status ESP8266: |P164_status_lb|
 
 GitHub: |P164_github|_
 
@@ -89,28 +91,32 @@ Note that if either one of the tasks is set to **Not Set** compensation is switc
 
 The ENS160 is sold on popular websites on a board including the AHT21 temperature and humidity sensor. This sensor can be used for the compensation algorithm of the ENS160.
 
-Data Acquisition
-^^^^^^^^^^^^^^^^
-
-This group of settings, **Single event with all values** and **Send to Controller** settings are standard available configuration items. Send to Controller is only visible when one or more Controllers are configured.
+.. include:: DataAcquisition.repl
 
 * **Interval** By default, Interval will be set to 60 sec. The data will be collected and optionally sent to any configured controllers using this interval. If the Interval is set lower or equal than the required 10 * Heater time, the plugin will not start!
 
 Values
 ^^^^^^
 
-The plugin provides the ``TVOC`` and ``eCO2`` values. A formula can be set to recalculate. The number of decimals can be set as desired, and defaults to 2.
+The plugin provides the ``TVOC``, ``eCO2`` and ``AQI`` values. A formula can be set to recalculate. The number of decimals can be set as desired, and defaults to 0.
 
 In selected builds, per Value is a **Stats** checkbox available, that when checked, gathers the data and presents recent data in a graph, as described here: :ref:`Task Value Statistics:  <Task Value Statistics>`
 
 Currently the extra features offered by the sensor are not configurable in this plugin.
 These may be added later.
 
+Commands available
+^^^^^^^^^^^^^^^^^^
+
+.. include:: P164_commands.repl
+
 Change log
 ----------
 
 .. versionchanged:: 2.0
   ...
+
+  |changed| 2024-12-21 Added AQI value
 
   |added|
   2023-12-27 Initial release version.

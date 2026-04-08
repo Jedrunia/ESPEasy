@@ -113,16 +113,10 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
-      Device[++deviceCount].Number           = PLUGIN_ID_101;
-      Device[deviceCount].Type               = DEVICE_TYPE_DUMMY;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_NONE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].ValueCount         = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = false;
-      Device[deviceCount].SendDataOption     = false;
-      Device[deviceCount].TimerOption        = false;
+      auto& dev = Device[++deviceCount];
+      dev.Number   = PLUGIN_ID_101;
+      dev.Type     = DEVICE_TYPE_DUMMY;
+      dev.VType    = Sensor_VType::SENSOR_TYPE_NONE;
       break;
     }
 
@@ -167,7 +161,7 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
       String errorStr;
 
       // Check Task Name.
-      uint8_t nameCode = safeName(event->TaskIndex);
+      const uint8_t nameCode = safeName(event->TaskIndex);
 
       if ((nameCode == NAME_MISSING) || (nameCode == NAME_UNSAFE)) {        // Check to see if user submitted safe device name.
         strcpy(ExtraTaskSettings.TaskDeviceName, PSTR(DEF_TASK_NAME_P101)); // Use default name.
@@ -188,13 +182,13 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
       if (strlen(deviceTemplate[0]) == 0) { // IP Address missing, use default value (without webform warning).
         strcpy_P(deviceTemplate[0], PSTR(IP_STR_DEF_P101));
 
-        addLogMove(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Loaded Default IP = " IP_STR_DEF_P101));
+        addLog(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Loaded Default IP = " IP_STR_DEF_P101));
       }
       else if (strlen(deviceTemplate[0]) < IP_MIN_SIZE_P101) { // IP Address too short, load default value. Warn User.
         strcpy_P(deviceTemplate[0], PSTR(IP_STR_DEF_P101));
 
         errorStr += F("Provided IP Invalid (Using Default). ");
-        addLogMove(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Provided IP Invalid (Using Default). [" IP_STR_DEF_P101 "]"));
+        addLog(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Provided IP Invalid (Using Default). [" IP_STR_DEF_P101 "]"));
       }
       else if (!validateIp(deviceTemplate[0])) { // Unexpected IP Address value. Leave as-is, but Warn User.
         errorStr += F("WARNING, Please Review IP Address. ");
@@ -213,7 +207,7 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
         strcpy_P(deviceTemplate[1], PSTR(MAC_STR_DEF_P101));
 
         errorStr += F("MAC Address Not Provided, Populated with Zero Values. ");
-        addLogMove(LOG_LEVEL_INFO, F(LOG_NAME_P101 "MAC Address Not Provided, Populated with Zero Values. "));
+        addLog(LOG_LEVEL_INFO, F(LOG_NAME_P101 "MAC Address Not Provided, Populated with Zero Values. "));
       }
       else if (!validateMac(deviceTemplate[1])) { // Suspicious MAC Address. Leave as-is, but warn User.
         errorStr += F("ERROR, MAC Address Invalid. ");
@@ -237,7 +231,7 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
     }
 
     case PLUGIN_READ: {
-      success = false;
+      // Do nothing on purpose
       break;
     }
 
@@ -317,11 +311,11 @@ boolean Plugin_101(uint8_t function, struct EventStruct *event, String& string)
             // WOL.setRepeat(1, 0); // One Magic Packet, No Repeats. (Library default)
 
             if (!WOL.sendMagicPacket(paramMac, paramPort.toInt())) {
-              addLogMove(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Error, Magic Packet Failed (check parameters)"));
+              addLog(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Error, Magic Packet Failed (check parameters)"));
             }
           }
           else {
-            addLogMove(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Error, WiFi Off-Line"));
+            addLog(LOG_LEVEL_INFO, F(LOG_NAME_P101 "Error, WiFi Off-Line"));
           }
         }
       }
@@ -362,11 +356,13 @@ bool validateIp(const String& ipStr) {
   if ((length < IP_MIN_SIZE_P101) || (length > IP_ADDR_SIZE_P101)) {
     return false;
   }
-  else if (ip.fromString(ipStr) == false) { // ThomasTech's Trick to Check IP for valid formatting.
-    return false;
-  }
 
-  return true;
+  // else if (ip.fromString(ipStr) == false) { // ThomasTech's Trick to Check IP for valid formatting.
+  //   return false;
+  // }
+
+  // return true;
+  return ip.fromString(ipStr); // Trick is nice, code not so readable :-)
 }
 
 // ************************************************************************************************
@@ -405,19 +401,9 @@ bool validateMac(const String& macStr) {
 // Arg: Port Number String (decimal).
 // Return true if Port string appears legit.
 bool validatePort(const String& portStr) {
-  bool pass = true;
-  long portNumber;
+  uint32_t portNumber{};
 
-  portNumber = portStr.toInt();
-
-  if ((portNumber < 0) || (portNumber > PORT_MAX_P101)) {
-    pass = false;
-  }
-  else if (!isDigit(portStr.charAt(0))) {
-    pass = false;
-  }
-
-  return pass;
+  return validUIntFromString(portStr, portNumber) && portNumber <= PORT_MAX_P101;
 }
 
 // ************************************************************************************************

@@ -8,6 +8,7 @@
 // Maxim Integrated (ex Dallas) DS18B20 datasheet : https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf
 
 /** Changelog:
+ * 2025-01-12 tonhuisman: Add support for MQTT AutoDiscovery
  * 2024-05-11 tonhuisman: Add Get Config Value support for sensor statistics: Read success, Read retry, Read failed,
  *                        Read init failed, Resolution and Address (formatted)
  *                        [<taskname>#sensorstats,<sensorindex>,success|retry|failed|initfailed|resolution|address]
@@ -23,7 +24,7 @@
 
 # define PLUGIN_004
 # define PLUGIN_ID_004         4
-# define PLUGIN_NAME_004       "Environment - 1-Wire Temperature"
+# define PLUGIN_NAME_004       "Environment - DS18xxx/MAX31xxx/1-Wire Temperature"
 # define PLUGIN_VALUENAME1_004 "Temperature"
 
 # define P004_ERROR_NAN        0
@@ -51,19 +52,17 @@ boolean Plugin_004(uint8_t function, struct EventStruct *event, String& string)
   {
     case PLUGIN_DEVICE_ADD:
     {
-      Device[++deviceCount].Number           = PLUGIN_ID_004;
-      Device[deviceCount].Type               = DEVICE_TYPE_DUAL;
-      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_SINGLE;
-      Device[deviceCount].Ports              = 0;
-      Device[deviceCount].PullUpOption       = false;
-      Device[deviceCount].InverseLogicOption = false;
-      Device[deviceCount].FormulaOption      = true;
-      Device[deviceCount].ValueCount         = 1;
-      Device[deviceCount].SendDataOption     = true;
-      Device[deviceCount].TimerOption        = true;
-      Device[deviceCount].GlobalSyncOption   = true;
-      Device[deviceCount].OutputDataType     = Output_Data_type_t::Simple;
-      Device[deviceCount].PluginStats        = true;
+      auto& dev = Device[++deviceCount];
+      dev.Number         = PLUGIN_ID_004;
+      dev.Type           = DEVICE_TYPE_DUAL;
+      dev.VType          = Sensor_VType::SENSOR_TYPE_SINGLE;
+      dev.FormulaOption  = true;
+      dev.ValueCount     = 1;
+      dev.SendDataOption = true;
+      dev.TimerOption    = true;
+      dev.OutputDataType = Output_Data_type_t::Simple;
+      dev.PluginStats    = true;
+      dev.setPin2Direction(gpio_direction::gpio_output);
       break;
     }
 
@@ -93,6 +92,14 @@ boolean Plugin_004(uint8_t function, struct EventStruct *event, String& string)
       success           = true;
       break;
     }
+
+    # if FEATURE_MQTT_DISCOVER
+    case PLUGIN_GET_DISCOVERY_VTYPES:
+    {
+      success = getDiscoveryVType(event, Plugin_QueryVType_Temperature, 255, event->Par5);
+      break;
+    }
+    # endif // if FEATURE_MQTT_DISCOVER
 
     case PLUGIN_SET_DEFAULTS:
     {
@@ -140,19 +147,27 @@ boolean Plugin_004(uint8_t function, struct EventStruct *event, String& string)
           int resolutionChoice = P004_RESOLUTION;
 
           if ((resolutionChoice < 9) || (resolutionChoice > 12)) { resolutionChoice = activeRes; }
-          const __FlashStringHelper *resultsOptions[4] = { F("9"), F("10"), F("11"), F("12") };
-          int resultsOptionValues[4]                   = { 9, 10, 11, 12 };
-          addFormSelector(F("Device Resolution"), F("res"), 4, resultsOptions, resultsOptionValues, resolutionChoice);
-          addHtml(F(" Bit"));
+          constexpr int resultsOptionValues[] { 9, 10, 11, 12 };
+
+          const FormSelectorOptions selector(
+            NR_ELEMENTS(resultsOptionValues),
+            resultsOptionValues);
+          selector.addFormSelector(F("Device Resolution"), F("res"), resolutionChoice);
+          addUnit(F("bit"));
         }
 
         {
           // Value in case of Error
-          const __FlashStringHelper *resultsOptions[5] = { F("NaN"), F("-127"), F("0"), F("125"), F("Ignore") };
-          int resultsOptionValues[5]                   =
-          { P004_ERROR_NAN, P004_ERROR_MIN_RANGE, P004_ERROR_ZERO, P004_ERROR_MAX_RANGE, P004_ERROR_IGNORE };
-          addFormSelector(F("Error State Value"), F("err"), 5, resultsOptions, resultsOptionValues, P004_ERROR_STATE_OUTPUT);
+          const __FlashStringHelper *resultsOptions[] = { F("NaN"), F("-127"), F("0"), F("125"), F("Ignore") };
+          constexpr int resultsOptionValues[] { P004_ERROR_NAN, P004_ERROR_MIN_RANGE, P004_ERROR_ZERO, P004_ERROR_MAX_RANGE,
+                                                P004_ERROR_IGNORE };
+
+          const FormSelectorOptions selector(
+            NR_ELEMENTS(resultsOptionValues),
+            resultsOptions, resultsOptionValues);
+          selector.addFormSelector(F("Error State Value"), F("err"), P004_ERROR_STATE_OUTPUT);
         }
+#ifndef LIMIT_BUILD_SIZE
         addFormNote(F("External pull up resistor is needed, see docs!"));
 
         {
@@ -160,16 +175,30 @@ boolean Plugin_004(uint8_t function, struct EventStruct *event, String& string)
             static_cast<P004_data_struct *>(getPluginTaskData(event->TaskIndex));
 
           if (nullptr != P004_data) {
-            for (uint8_t i = 0; i < valueCount; ++i) {
-              if (i == 0) {
-                addFormSubHeader(F("Statistics"));
-              } else {
-                addFormSeparator(2);
+            addFormSubHeader(F("Statistics"));
+            addRowLabel(F("Data pin Rise Time"));
+            const int riseTime = P004_data->measure_rise_time();
+            if (riseTime == 0) {
+              addHtml(F("< 1"));
+            } else {
+              if (riseTime >= 15) {
+                addHtml('>');
               }
+              addHtmlInt(riseTime);
+            }
+            addUnit(F("usec"));
+            if (riseTime > 6) {
+              addHtml(F("&nbsp;"));
+              addEnabled(false);
+              addHtml(F("&nbsp;Too Slow! Reduce pull-up resistance"));
+            }
+            for (uint8_t i = 0; i < valueCount; ++i) {
+              addFormSeparator(2);
               Dallas_show_sensor_stats_webform_load(P004_data->get_sensor_data(i));
             }
           }
         }
+#endif
       }
       success = true;
       break;
@@ -339,9 +368,7 @@ boolean Plugin_004(uint8_t function, struct EventStruct *event, String& string)
                 } else {
                   log += F("Error!");
                 }
-                log += F(" (");
-                log += P004_data->get_formatted_address(i);
-                log += ')';
+                log += strformat(F(" (%s)"), P004_data->get_formatted_address(i).c_str());
                 addLogMove(LOG_LEVEL_INFO, log);
               }
             }

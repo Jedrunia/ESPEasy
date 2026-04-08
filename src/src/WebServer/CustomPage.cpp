@@ -10,7 +10,6 @@
 
 #include "../Commands/ExecuteCommand.h"
 #include "../Globals/Nodes.h"
-#include "../Globals/Device.h"
 #include "../Globals/Plugins.h"
 #include "../Globals/Settings.h"
 
@@ -98,7 +97,7 @@ bool handle_custom(const String& path) {
         addSelector_Item(name, it->first, choice == it->first);
       }
     }
-    addSelector_Foot();
+    addSelector_Foot(true);
 
     // create <> navigation buttons
     uint8_t prev = Settings.Unit;
@@ -147,6 +146,9 @@ bool handle_custom(const String& path) {
 
   if (dataFile)
   {
+    if (!dashboardPage) {
+      TXBuffer.startStream(); // Start streaming as it hasn't been started yet, to avoid HTTP/0.9 fallback response
+    }
     // Read the file per line and serve per line to reduce amount of memory needed.
     size_t available = dataFile.available();
     String line;
@@ -201,11 +203,10 @@ bool handle_custom(const String& path) {
             const uint8_t valueCount = getValueCountForTask(x);
 
             struct EventStruct TempEvent(x);
-            for (uint8_t varNr = 0; varNr < VARS_PER_TASK; varNr++)
+            for (uint8_t varNr = 0; varNr < valueCount; varNr++)
             {
-              const String taskValueName = getTaskValueName(x, varNr);
-              if ((varNr < valueCount) &&
-                  (!taskValueName.isEmpty()))
+              const String taskValueName = Cache.getTaskDeviceValueName(x, varNr);
+              if (!taskValueName.isEmpty())
               {
                 if (varNr > 0) {
                   html_TR_TD();

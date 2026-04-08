@@ -13,13 +13,10 @@
 #include "../WebServer/Markup_Forms.h"
 
 #include "../ESPEasyCore/ESPEasyRules.h"
-#include "../ESPEasyCore/Serial.h"
 
 #include "../Globals/Settings.h"
 #include "../Helpers/ESPEasy_Storage.h"
-#include "../Helpers/Numerical.h"
 #include "../Helpers/StringConverter.h"
-#include "../Static/WebStaticData.h"
 
 #include <FS.h>
 
@@ -48,9 +45,11 @@ void handle_rules() {
   // Make sure file exists
   if (!fileExists(fileName))
   {
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_INFO)) {
       addLogMove(LOG_LEVEL_INFO, concat(F("Rules : Create new file: %s"), fileName));
     }
+#endif
     fs::File f = tryOpenFile(fileName, "w");
 
     if (f) { f.close(); }
@@ -81,17 +80,16 @@ void handle_rules() {
       optionValues[x] = x + 1;
     }
 
-    addSelector_reloadOnChange(
-      F("set"),
+    FormSelectorOptions selector(
       RULESETS_MAX,
       options,
-      optionValues,
-      nullptr,
-      choice,
-      F("return rules_set_onchange(rulesselect)"),
-      true,
-      F("wide"));
-    addHelpButton(F("Tutorial_Rules"));
+      optionValues);
+
+    selector.onChangeCall = F("return rules_set_onchange(rulesselect)");
+    selector.addSelector(
+      F("set"),
+      choice);
+    // addHelpButton(F("Tutorial_Rules")); // Old documentation is just that: Old and out-dated.
     addRTDHelpButton(F("Rules/Rules.html"));
   }
 
@@ -521,7 +519,7 @@ bool handle_rules_edit(String originalUri, bool isAddNew) {
     addHelpButton(F("Tutorial_Rules"));
 
     // load form data from flash
-    addHtml(F("<TR><TD colspan='2'>"));
+    addRowColspan(2);
 
     Rule_showRuleTextArea(fileName);
 
@@ -549,7 +547,9 @@ void Rule_showRuleTextArea(const String& fileName) {
   addHtml(F("<textarea id='rules' name='rules' rows='30' wrap='off'>"));
   size = streamFromFS(fileName, true);
   addHtml(F("</textarea>"));
-  addHtml(F("<script>initCM();</script>"));
+  #if FEATURE_RULES_EASY_COLOR_CODE
+  html_add_script(F("initCM();"), false);
+  #endif
 
   html_TR_TD();
   addHtml(F("Current size: <span id='size'>"));
@@ -574,7 +574,7 @@ bool Rule_Download(const String& path)
   filename.replace(RULE_FILE_SEPARAROR, '_');
   String str = concat(F("attachment; filename="), filename);
   sendHeader(F("Content-Disposition"), str);
-  sendHeader(F("Cache-Control"),       F("max-age=3600, public"));
+  sendHeader(F("Cache-Control"),       F("public,max-age=3600"));
   sendHeader(F("Vary"),                "*");
   sendHeader(F("ETag"),                F("\"2.0.0\""));
 
